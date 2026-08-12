@@ -6,6 +6,7 @@ from app.schemas.user import UserCreate, UserResponse, UserLogin, Token
 from app.core.security import hash_password, verify_password, create_access_token
 from app.schemas.user import UserCreate, UserResponse, UserLogin, Token, ForgotPasswordRequest, ResetPasswordRequest
 from app.core.security import hash_password, verify_password, create_access_token, create_reset_token, verify_reset_token
+from fastapi.security import OAuth2PasswordRequestForm
 router = APIRouter(prefix='/auth', tags=['Authentication'])
 @router.post('/register', response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def register_user(user_data: UserCreate, db: Session=Depends(get_db)):
@@ -20,13 +21,17 @@ def register_user(user_data: UserCreate, db: Session=Depends(get_db)):
         db.refresh(new_user)
         return new_user
 @router.post('/login', response_model=Token)
-def login_user(user_data: UserLogin, db: Session=Depends(get_db)):
-    user = db.query(User).filter(User.email == user_data.email).first()
-    if not user or not verify_password(user_data.password, user.hashed_password):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='البريد الإلكتروني أو كلمة المرور غير صحيحة')
-    else:
-        access_token = create_access_token(data={'sub': str(user.id), 'role': user.role})
-        return {'access_token': access_token, 'token_type': 'bearer'}
+def login_user(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == form_data.username).first()
+    
+    if not user or not verify_password(form_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, 
+            detail='البريد الإلكتروني أو كلمة المرور غير صحيحة'
+        )
+    
+    access_token = create_access_token(data={'sub': str(user.id), 'role': user.role})
+    return {'access_token': access_token, 'token_type': 'bearer'}
 @router.post('/forgot-password')
 def forgot_password(request: ForgotPasswordRequest, db: Session=Depends(get_db)):
     user = db.query(User).filter(User.email == request.email).first()
