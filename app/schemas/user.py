@@ -4,9 +4,10 @@ import re
 
 # مخطط البيانات التي سيرسلها المستخدم عند التسجيل
 class UserCreate(BaseModel):
+    full_name: str
     email: EmailStr
     password: str
-    role: Optional[str] = "student"
+   
 
     # التحقق من شروط كلمة المرور
     @field_validator('password')
