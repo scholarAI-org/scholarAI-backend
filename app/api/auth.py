@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from app.models.profile import Profile
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.user import User
@@ -14,11 +15,22 @@ def register_user(user_data: UserCreate, db: Session=Depends(get_db)):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='البريد الإلكتروني مسجل بالفعل!')
     else:
         hashed_pwd = hash_password(user_data.password)
-        new_user = User(email=user_data.email, hashed_password=hashed_pwd, role=user_data.role)
-        db.add(new_user)
-        db.commit()
-        db.refresh(new_user)
-        return new_user
+        new_user = User(email=user_data.email, hashed_password=hashed_pwd, role='student')
+
+        try:
+            db.add(new_user)
+            db.flush()
+
+            new_profile = Profile(user_id=new_user.id, full_name=user_data.full_name)
+            db.add(new_profile)
+
+            db.commit()
+            db.refresh(new_user)
+            return new_user
+
+        except Exception:
+            db.rollback()
+            raise
 @router.post('/login', response_model=Token)
 def login_user(user_data: UserLogin, db: Session=Depends(get_db)):
     user = db.query(User).filter(User.email == user_data.email).first()
