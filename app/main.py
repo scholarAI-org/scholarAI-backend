@@ -14,12 +14,12 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# قائمة النطاقات المسموح لها بالتواصل مع الباك إند
-origins = [
-    "http://localhost:3000",       # للفرونت إند المحلي (React / Next.js)
-    "http://127.0.0.1:3000",
-]
 
+origins = [
+    "http://localhost:3000",  # إذا كان يستخدم React/Next.js
+    "http://localhost:5173",  # إذا كان يستخدم Vite
+    "http://127.0.0.1:5500",  # إذا كان يستخدم Live Server
+]
 # إضافة دومين الإنتاج للفرونت إند تلقائياً في حال وجوده بالبيئة
 frontend_url = os.getenv("FRONTEND_URL")
 if frontend_url:

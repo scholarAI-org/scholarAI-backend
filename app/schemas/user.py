@@ -1,12 +1,14 @@
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, field_validator , Field
 from typing import Optional
 import re
 
 # مخطط البيانات التي سيرسلها المستخدم عند التسجيل
+
 class UserCreate(BaseModel):
+    full_name: str
     email: EmailStr
     password: str
-    role: Optional[str] = "student"
+    role: Optional[str] = "student"  # اختياري والقيمة الافتراضية طالب
 
     # التحقق من شروط كلمة المرور
     @field_validator('password')
@@ -30,9 +32,9 @@ class UserCreate(BaseModel):
 # مخطط البيانات التي نرجعها للمستخدم كـ Response (بدون الباسورد!)
 class UserResponse(BaseModel):
     id: int
+    full_name: str
     email: EmailStr
     role: str
-    is_active: bool
 
     class Config:
         from_attributes = True
@@ -68,4 +70,6 @@ class ResetPasswordRequest(BaseModel):
         if not re.search(r"[!@#$%^&*(),.?\":{}|<>]", v):
             raise ValueError('كلمة المرور يجب أن تحتوي على رمز خاص واحد على الأقل (!@#$%^&*)')
         return v
-    
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str = Field(..., min_length=6, description="كلمة المرور الجديدة يجب ألا تقل عن 6 خانات")
