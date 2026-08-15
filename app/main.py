@@ -1,4 +1,3 @@
-import os
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -15,23 +14,12 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# قائمة النطاقات المسموح لها بالتواصل مع الباك إند
-origins = [
-    "http://localhost:3000",       # للفرونت إند المحلي (React / Next.js)
-    "http://127.0.0.1:3000",
-]
-
-# إضافة دومين الإنتاج للفرونت إند تلقائياً في حال وجوده بالبيئة
-frontend_url = os.getenv("FRONTEND_URL")
-if frontend_url:
-    origins.append(frontend_url)
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],           # السماح بـ POST, GET, PUT, DELETE... الخ
-    allow_headers=["*"],           # السماح بكافة الـ Headers مثل Authorization
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 app.include_router(auth_router)
