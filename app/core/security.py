@@ -5,7 +5,7 @@ from typing import Optional
 
 # ➕ إضافة الاستيرادات الخاصة بـ FastAPI و Database من أجل دالة get_current_user
 from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.user import User
@@ -55,23 +55,46 @@ def verify_reset_token(token: str) -> Optional[str]:
 # 🆕 الدالة الجديدة: استخراج المستخدم الحالي من التوكن
 # ==========================================
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
+security = HTTPBearer()
 
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+):
+    token = credentials.credentials
+
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="تعذر التحقق من الهوية، التوكن غير صالح أو منتهي",
+        detail="غير مصرح، التوكن غير صالح أو منتهي الصلاحية",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        if email is None:
+        payload = jwt.decode(
+            token,
+            SECRET_KEY,
+            algorithms=[ALGORITHM]
+        )
+
+        user_id_str = payload.get("sub")
+
+        if user_id_str is None:
             raise credentials_exception
-    except jwt.PyJWTError:
+
+        user_id = int(user_id_str)
+
+    except (jwt.PyJWTError, ValueError, TypeError):
         raise credentials_exception
-        
-    user = db.query(User).filter(User.email == email).first()
+
+    user = (
+        db.query(User)
+        .filter(User.id == user_id)
+        .first()
+    )
+
     if user is None:
         raise credentials_exception
+
     return user
+# 
