@@ -32,9 +32,9 @@ class UserCreate(BaseModel):
 # مخطط البيانات التي نرجعها للمستخدم كـ Response (بدون الباسورد!)
 class UserResponse(BaseModel):
     id: int
-    full_name: str
     email: EmailStr
     role: str
+    is_active: bool
 
     class Config:
         from_attributes = True
@@ -55,21 +55,49 @@ class Token(BaseModel):
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
 
-# مخطط إعادة تعيين كلمة المرور باستخدام الرمز
 class ResetPasswordRequest(BaseModel):
     token: str
     new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("كلمة المرور يجب أن تكون 8 أحرف على الأقل")
+
+        if not re.search(r"\d", v):
+            raise ValueError(
+                "كلمة المرور يجب أن تحتوي على رقم واحد على الأقل"
+            )
+
+        if not re.search(r'[!@#$%^&*(),.?":{}|<>]', v):
+            raise ValueError(
+                "كلمة المرور يجب أن تحتوي على رمز خاص واحد على الأقل (!@#$%^&*)"
+            )
+
+        return v
+
+# مخطط إعادة تعيين كلمة المرور باستخدام الرمز
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str = Field(
+        ...,
+        min_length=8,
+        description="كلمة المرور الجديدة يجب ألا تقل عن 8 خانات"
+    )
 
     @field_validator('new_password')
     @classmethod
     def validate_password(cls, v: str) -> str:
         if len(v) < 8:
             raise ValueError('كلمة المرور يجب أن تكون 8 أحرف على الأقل')
+
         if not re.search(r"\d", v):
             raise ValueError('كلمة المرور يجب أن تحتوي على رقم واحد على الأقل')
+
         if not re.search(r"[!@#$%^&*(),.?\":{}|<>]", v):
-            raise ValueError('كلمة المرور يجب أن تحتوي على رمز خاص واحد على الأقل (!@#$%^&*)')
+            raise ValueError(
+                'كلمة المرور يجب أن تحتوي على رمز خاص واحد على الأقل (!@#$%^&*)'
+            )
+
         return v
-class ChangePasswordRequest(BaseModel):
-    old_password: str
-    new_password: str = Field(..., min_length=6, description="كلمة المرور الجديدة يجب ألا تقل عن 6 خانات")

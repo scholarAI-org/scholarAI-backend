@@ -68,7 +68,6 @@ class ProfileBase(BaseModel):
     currency: Optional[str] = "USD"
 
     # Contact Info
-    email: Optional[EmailStr] = None
     country: Optional[str] = None
     city: Optional[str] = None
     address: Optional[str] = None

@@ -1,6 +1,6 @@
-from sqlalchemy import Column, Integer, String, Float, Date, Boolean, ForeignKey, Text
+from sqlalchemy import Boolean, Column, Date, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
+
 from app.core.database import Base
 
 
@@ -30,7 +30,6 @@ class Profile(Base):
     currency = Column(String, default="USD")
 
     # Contact Information
-    email = Column(String, nullable=True)
     country = Column(String, nullable=True)
     city = Column(String, nullable=True)
     address = Column(Text, nullable=True)
