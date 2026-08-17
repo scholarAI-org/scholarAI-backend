@@ -1,13 +1,14 @@
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, field_validator , Field
 from typing import Optional
 import re
 
 # مخطط البيانات التي سيرسلها المستخدم عند التسجيل
+
 class UserCreate(BaseModel):
     full_name: str
     email: EmailStr
     password: str
-   
+    role: Optional[str] = "student"  # اختياري والقيمة الافتراضية طالب
 
     # التحقق من شروط كلمة المرور
     @field_validator('password')
@@ -54,19 +55,49 @@ class Token(BaseModel):
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
 
-# مخطط إعادة تعيين كلمة المرور باستخدام الرمز
 class ResetPasswordRequest(BaseModel):
     token: str
     new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("كلمة المرور يجب أن تكون 8 أحرف على الأقل")
+
+        if not re.search(r"\d", v):
+            raise ValueError(
+                "كلمة المرور يجب أن تحتوي على رقم واحد على الأقل"
+            )
+
+        if not re.search(r'[!@#$%^&*(),.?":{}|<>]', v):
+            raise ValueError(
+                "كلمة المرور يجب أن تحتوي على رمز خاص واحد على الأقل (!@#$%^&*)"
+            )
+
+        return v
+
+# مخطط إعادة تعيين كلمة المرور باستخدام الرمز
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str = Field(
+        ...,
+        min_length=8,
+        description="كلمة المرور الجديدة يجب ألا تقل عن 8 خانات"
+    )
 
     @field_validator('new_password')
     @classmethod
     def validate_password(cls, v: str) -> str:
         if len(v) < 8:
             raise ValueError('كلمة المرور يجب أن تكون 8 أحرف على الأقل')
+
         if not re.search(r"\d", v):
             raise ValueError('كلمة المرور يجب أن تحتوي على رقم واحد على الأقل')
+
         if not re.search(r"[!@#$%^&*(),.?\":{}|<>]", v):
-            raise ValueError('كلمة المرور يجب أن تحتوي على رمز خاص واحد على الأقل (!@#$%^&*)')
+            raise ValueError(
+                'كلمة المرور يجب أن تحتوي على رمز خاص واحد على الأقل (!@#$%^&*)'
+            )
+
         return v
-    
