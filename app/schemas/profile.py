@@ -121,13 +121,13 @@ class ProfileCreate(ProfileBase):
 class ProfileUpdate(BaseModel):
 
     # Personal Info
-    full_name: Optional[str] = None
-    gender: Optional[str] = None
+    full_name: Optional[RequiredText] = None
+    gender: Optional[RequiredText] = None
     marital_status: Optional[str] = None
     date_of_birth: Optional[date] = None
     country_of_birth: Optional[str] = None
-    nationality: Optional[str] = None
-    country_of_residence: Optional[str] = None
+    nationality: Optional[RequiredText] = None
+    country_of_residence: Optional[RequiredText] = None
     id_type: Optional[str] = None
     id_number: Optional[str] = None
 
@@ -140,18 +140,34 @@ class ProfileUpdate(BaseModel):
     currency: Optional[str] = None
 
     # Contact Info
-    country: Optional[str] = None
-    city: Optional[str] = None
+    country: Optional[RequiredText] = None
+    city: Optional[RequiredText] = None
     address: Optional[str] = None
-    phone_number: Optional[str] = None
+    phone_number: Optional[RequiredText] = None
 
     # Academic Background
-    degree: Optional[str] = None
-    major: Optional[str] = None
-    institution_name: Optional[str] = None
+    degree: Optional[RequiredText] = None
+    major: Optional[RequiredText] = None
+    institution_name: Optional[RequiredText] = None
     graduation_year: Optional[int] = None
     gpa: Optional[float] = None
     gpa_scale: Optional[str] = None
+
+    @field_validator(
+        "full_name", "gender", "nationality", "country_of_residence",
+        "country", "city", "phone_number", "degree", "major",
+        "institution_name"
+    )
+    @classmethod
+    def reject_placeholder_values(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+
+        forbidden = {"string", "select", "choose", "اختر", "غير محدد"}
+        if value.casefold() in forbidden:
+            raise ValueError("يرجى إدخال قيمة حقيقية، وليس قيمة افتراضية")
+
+        return value
 
 
 # ==========================================
