@@ -36,18 +36,6 @@ def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
 
     try:
         db.add(new_user)
-
-        # نحصل على user.id قبل الـ commit
-        db.flush()
-
-        # إنشاء Profile تلقائياً وربطه بالمستخدم
-        new_profile = Profile(
-            user_id=new_user.id,
-            full_name=user_data.full_name
-        )
-
-        db.add(new_profile)
-
         db.commit()
         db.refresh(new_user)
 
