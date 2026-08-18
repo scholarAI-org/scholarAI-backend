@@ -1,6 +1,10 @@
-from pydantic import BaseModel, Field
-from typing import Optional, List
+from pydantic import BaseModel, Field, StringConstraints
+from typing import Annotated, Optional, List
 from datetime import date
+from pydantic import field_validator
+
+# نص إلزامي: لا يقبل قيمة فارغة أو مسافات فقط.
+RequiredText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
 # ==========================================
@@ -55,13 +59,13 @@ class WorkExperienceResponse(WorkExperienceBase):
 class ProfileBase(BaseModel):
 
     # Personal Info
-    full_name: str
-    gender: str
+    full_name: RequiredText
+    gender: RequiredText
     marital_status: Optional[str] = None
     date_of_birth: date
     country_of_birth: Optional[str] = None
-    nationality: str
-    country_of_residence: str
+    nationality: RequiredText
+    country_of_residence: RequiredText
     id_type: Optional[str] = None
     id_number: Optional[str] = None
 
@@ -74,15 +78,15 @@ class ProfileBase(BaseModel):
     currency: Optional[str] = "USD"
 
     # Contact Info
-    country: str
-    city: str
+    country: RequiredText
+    city: RequiredText
     address: Optional[str] = None
-    phone_number: str
+    phone_number: RequiredText
 
     # Academic Background
-    degree: str
-    major: str
-    institution_name: str
+    degree: RequiredText
+    major: RequiredText
+    institution_name: RequiredText
     graduation_year: int
     gpa: float
     gpa_scale: str = "100"
@@ -94,6 +98,20 @@ class ProfileBase(BaseModel):
 class ProfileCreate(ProfileBase):
     experiences: List[WorkExperienceCreate] = Field(default_factory=list)
     languages: List[LanguageCreate] = Field(default_factory=list)
+
+    @field_validator(
+        "full_name", "gender", "nationality", "country_of_residence",
+        "country", "city", "phone_number", "degree", "major",
+        "institution_name"
+    )
+    @classmethod
+    def reject_placeholder_values(cls, value: str) -> str:
+        forbidden = {"string", "select", "choose", "اختر", "غير محدد"}
+
+        if value.strip().casefold() in forbidden:
+            raise ValueError("يرجى إدخال قيمة حقيقية، وليس قيمة افتراضية")
+
+        return value
 
 
 # ==========================================
