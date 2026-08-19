@@ -32,6 +32,7 @@ class UserCreate(BaseModel):
 # مخطط البيانات التي نرجعها للمستخدم كـ Response (بدون الباسورد!)
 class UserResponse(BaseModel):
     id: int
+    full_name: str
     email: EmailStr
     role: str
     is_active: bool

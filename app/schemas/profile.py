@@ -1,6 +1,11 @@
-from pydantic import BaseModel, EmailStr
-from typing import Optional, List
+from pydantic import BaseModel, Field, StringConstraints
+from typing import Annotated, Optional, List
 from datetime import date
+from pydantic import field_validator
+
+# نص إلزامي: لا يقبل قيمة فارغة أو مسافات فقط.
+RequiredText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+
 
 # ==========================================
 # 1. Schemas الخاص باللغات (Language)
@@ -10,8 +15,10 @@ class LanguageBase(BaseModel):
     proficiency_level: Optional[str] = None
     certificate_url: Optional[str] = None
 
+
 class LanguageCreate(LanguageBase):
     pass
+
 
 class LanguageResponse(LanguageBase):
     id: int
@@ -22,7 +29,7 @@ class LanguageResponse(LanguageBase):
 
 
 # ==========================================
-# 2. Schemas الخااص ببيانات العمل (Work Experience)
+# 2. Schemas الخاص ببيانات العمل (Work Experience)
 # ==========================================
 class WorkExperienceBase(BaseModel):
     company_name: str
@@ -33,8 +40,10 @@ class WorkExperienceBase(BaseModel):
     end_date: Optional[date] = None
     is_current: Optional[bool] = False
 
+
 class WorkExperienceCreate(WorkExperienceBase):
     pass
+
 
 class WorkExperienceResponse(WorkExperienceBase):
     id: int
@@ -48,14 +57,15 @@ class WorkExperienceResponse(WorkExperienceBase):
 # 3. Schemas الرئيسي للبروفايل (Profile)
 # ==========================================
 class ProfileBase(BaseModel):
+
     # Personal Info
-    full_name: str
-    gender: Optional[str] = None
+    full_name: RequiredText
+    gender: RequiredText
     marital_status: Optional[str] = None
-    date_of_birth: Optional[date] = None
+    date_of_birth: date
     country_of_birth: Optional[str] = None
-    nationality: Optional[str] = None
-    country_of_residence: Optional[str] = None
+    nationality: RequiredText
+    country_of_residence: RequiredText
     id_type: Optional[str] = None
     id_number: Optional[str] = None
 
@@ -68,60 +78,107 @@ class ProfileBase(BaseModel):
     currency: Optional[str] = "USD"
 
     # Contact Info
-    country: Optional[str] = None
-    city: Optional[str] = None
+    country: RequiredText
+    city: RequiredText
     address: Optional[str] = None
-    phone_number: Optional[str] = None
+    phone_number: RequiredText
 
     # Academic Background
-    degree: Optional[str] = None
-    major: Optional[str] = None
-    institution_name: Optional[str] = None
-    graduation_year: Optional[int] = None
-    gpa: Optional[float] = None
+    degree: RequiredText
+    major: RequiredText
+    institution_name: RequiredText
+    graduation_year: int
+    gpa: float
+    gpa_scale: str = "100"
 
 
-# Schema لإدخال بيانات البروفايل لأول مرة (يمكن إضافة قوائم للخبرات واللغات)
+# ==========================================
+# 4. إنشاء البروفايل لأول مرة
+# ==========================================
 class ProfileCreate(ProfileBase):
-    experiences: Optional[List[WorkExperienceCreate]] = []
-    languages: Optional[List[LanguageCreate]] = []
+    experiences: List[WorkExperienceCreate] = Field(default_factory=list)
+    languages: List[LanguageCreate] = Field(default_factory=list)
+
+    @field_validator(
+        "full_name", "gender", "nationality", "country_of_residence",
+        "country", "city", "phone_number", "degree", "major",
+        "institution_name"
+    )
+    @classmethod
+    def reject_placeholder_values(cls, value: str) -> str:
+        forbidden = {"string", "select", "choose", "اختر", "غير محدد"}
+
+        if value.strip().casefold() in forbidden:
+            raise ValueError("يرجى إدخال قيمة حقيقية، وليس قيمة افتراضية")
+
+        return value
 
 
-# Schema لتحديث البروفايل (جميع الحقول اختيارية)
+# ==========================================
+# 5. تحديث البروفايل
+# جميع الحقول اختيارية حتى نسمح بالتحديث الجزئي
+# ==========================================
 class ProfileUpdate(BaseModel):
-    full_name: Optional[str] = None
-    gender: Optional[str] = None
+
+    # Personal Info
+    full_name: Optional[RequiredText] = None
+    gender: Optional[RequiredText] = None
     marital_status: Optional[str] = None
     date_of_birth: Optional[date] = None
     country_of_birth: Optional[str] = None
-    nationality: Optional[str] = None
-    country_of_residence: Optional[str] = None
+    nationality: Optional[RequiredText] = None
+    country_of_residence: Optional[RequiredText] = None
     id_type: Optional[str] = None
     id_number: Optional[str] = None
+
+    # Family & Financial Info
     father_name: Optional[str] = None
     mother_name: Optional[str] = None
     father_income: Optional[float] = None
     mother_income: Optional[float] = None
     num_of_siblings: Optional[int] = None
     currency: Optional[str] = None
-    country: Optional[str] = None
-    city: Optional[str] = None
+
+    # Contact Info
+    country: Optional[RequiredText] = None
+    city: Optional[RequiredText] = None
     address: Optional[str] = None
-    phone_number: Optional[str] = None
-    degree: Optional[str] = None
-    major: Optional[str] = None
-    institution_name: Optional[str] = None
+    phone_number: Optional[RequiredText] = None
+
+    # Academic Background
+    degree: Optional[RequiredText] = None
+    major: Optional[RequiredText] = None
+    institution_name: Optional[RequiredText] = None
     graduation_year: Optional[int] = None
     gpa: Optional[float] = None
-    gpa_scale: Optional[str] = "100"  # خيارات مثل: "100", "4.0", "5.0"
+    gpa_scale: Optional[str] = None
+
+    @field_validator(
+        "full_name", "gender", "nationality", "country_of_residence",
+        "country", "city", "phone_number", "degree", "major",
+        "institution_name"
+    )
+    @classmethod
+    def reject_placeholder_values(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+
+        forbidden = {"string", "select", "choose", "اختر", "غير محدد"}
+        if value.casefold() in forbidden:
+            raise ValueError("يرجى إدخال قيمة حقيقية، وليس قيمة افتراضية")
+
+        return value
 
 
-# Schema المرجع للاستجابة (Response)
+# ==========================================
+# 6. Profile Response
+# ==========================================
 class ProfileResponse(ProfileBase):
     id: int
     user_id: int
-    experiences: List[WorkExperienceResponse] = []
-    languages: List[LanguageResponse] = []
+
+    experiences: List[WorkExperienceResponse] = Field(default_factory=list)
+    languages: List[LanguageResponse] = Field(default_factory=list)
 
     class Config:
         from_attributes = True
