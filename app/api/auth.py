@@ -28,7 +28,9 @@ def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
 
     hashed_pwd = hash_password(user_data.password)
 
+    # ✅ التعديل: إسناد full_name من user_data
     new_user = User(
+        full_name=user_data.full_name,
         email=user_data.email,
         hashed_password=hashed_pwd,
         role=user_data.role if user_data.role else "student"
@@ -36,18 +38,6 @@ def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
 
     try:
         db.add(new_user)
-
-        # نحصل على user.id قبل الـ commit
-        db.flush()
-
-        # إنشاء Profile تلقائياً وربطه بالمستخدم
-        new_profile = Profile(
-            user_id=new_user.id,
-            full_name=user_data.full_name
-        )
-
-        db.add(new_profile)
-
         db.commit()
         db.refresh(new_user)
 
@@ -56,7 +46,6 @@ def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
     except Exception:
         db.rollback()
         raise
-
 
 # 2. تسجيل الدخول
 @router.post('/login', response_model=Token)
