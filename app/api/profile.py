@@ -97,7 +97,30 @@ def update_profile(
 
     # تحديث الحقول التي أُرسلت فقط (Exclude Unset)
     update_data = profile_data.model_dump(exclude_unset=True)
+
+    required_fields = {
+        "full_name",
+        "gender",
+        "date_of_birth",
+        "nationality",
+        "country_of_residence",
+        "country",
+        "city",
+        "phone_number",
+        "degree",
+        "major",
+        "institution_name",
+        "graduation_year",
+        "gpa",
+    }
+
     for key, value in update_data.items():
+        if key in required_fields and value is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"{key} cannot be null."
+            )
+
         setattr(profile, key, value)
 
     db.commit()
