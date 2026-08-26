@@ -40,3 +40,8 @@ app.include_router(profile_router)
 @app.get("/")
 def root():
     return {"message": "Scholar AI API is Running!"}
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
