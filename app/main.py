@@ -1,20 +1,37 @@
+import logging
 import os
-from fastapi import FastAPI, Depends, HTTPException
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.orm import Session
-from sqlalchemy import text
-from app.core.database import get_db, engine
-from app import models
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError, OperationalError, SQLAlchemyError
+
+from app.core.database import Base, engine
+from app import models  # noqa: F401 — register models on Base.metadata
 from app.api.auth import router as auth_router
 from app.api.profile import router as profile_router
 from app.api.scholarships import router as scholarships_router
 
+logger = logging.getLogger("uvicorn.error")
 
-models.user.Base.metadata.create_all(bind=engine)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    try:
+        Base.metadata.create_all(bind=engine)
+    except SQLAlchemyError:
+        logger.exception(
+            "Database is unavailable or schema could not be created. "
+            "Check DATABASE_URL. Swagger will still load; data endpoints will fail."
+        )
+    yield
+
 
 app = FastAPI(
     title="Scholar AI API",
     version="1.0.0",
+    lifespan=lifespan,
     description=(
         "Scholar AI backend API.\n\n"
         "Auth bodies use JSON with snake_case field names "
@@ -43,22 +60,61 @@ app = FastAPI(
 
 
 origins = [
-    "http://localhost:3000",  # إذا كان يستخدم React/Next.js
-    "http://localhost:5173",  # إذا كان يستخدم Vite
-    "http://127.0.0.1:5500",  # إذا كان يستخدم Live Server
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5500",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
 ]
-# إضافة دومين الإنتاج للفرونت إند تلقائياً في حال وجوده بالبيئة
 frontend_url = os.getenv("FRONTEND_URL")
 if frontend_url:
-    origins.append(frontend_url)
+    origins.append(frontend_url.rstrip("/"))
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],           # السماح بـ POST, GET, PUT, DELETE... الخ
-    allow_headers=["*"],           # السماح بكافة الـ Headers مثل Authorization
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
+
+
+@app.exception_handler(IntegrityError)
+async def integrity_error_handler(request: Request, exc: IntegrityError):
+    logger.exception("Integrity error on %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=400,
+        content={"detail": "البيانات مكررة أو تخالف قيود قاعدة البيانات."},
+    )
+
+
+@app.exception_handler(OperationalError)
+async def operational_error_handler(request: Request, exc: OperationalError):
+    logger.exception("Database connection error on %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": (
+                "تعذر الاتصال بقاعدة البيانات. "
+                "تحقق من متغير DATABASE_URL ومن أن خدمة PostgreSQL تعمل."
+            )
+        },
+    )
+
+
+@app.exception_handler(SQLAlchemyError)
+async def sqlalchemy_error_handler(request: Request, exc: SQLAlchemyError):
+    logger.exception("Database error on %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": (
+                "فشل تنفيذ العملية على قاعدة البيانات. "
+                "راجع سجلات السيرفر أو تأكد أن الجداول مُحدَّثة (migrations)."
+            )
+        },
+    )
+
 
 app.include_router(auth_router)
 app.include_router(profile_router)

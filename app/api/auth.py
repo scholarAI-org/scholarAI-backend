@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
-from app.models.profile import Profile
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -54,12 +54,19 @@ def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
         db.add(new_user)
         db.commit()
         db.refresh(new_user)
-
         return new_user
-
-    except Exception:
+    except IntegrityError:
         db.rollback()
-        raise
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="البريد الإلكتروني مسجل بالفعل",
+        )
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="تعذر إنشاء الحساب بسبب خطأ في قاعدة البيانات",
+        )
 
 @router.post(
     '/login',
