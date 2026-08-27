@@ -1,14 +1,11 @@
 import logging
 import os
-from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError, OperationalError, SQLAlchemyError
 
-from app.core.database import Base, engine
-from app import models  # noqa: F401 — register models on Base.metadata
 from app.api.auth import router as auth_router
 from app.api.profile import router as profile_router
 from app.api.scholarships import router as scholarships_router
@@ -16,22 +13,9 @@ from app.api.scholarships import router as scholarships_router
 logger = logging.getLogger("uvicorn.error")
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    try:
-        Base.metadata.create_all(bind=engine)
-    except SQLAlchemyError:
-        logger.exception(
-            "Database is unavailable or schema could not be created. "
-            "Check DATABASE_URL. Swagger will still load; data endpoints will fail."
-        )
-    yield
-
-
 app = FastAPI(
     title="Scholar AI API",
     version="1.0.0",
-    lifespan=lifespan,
     description=(
         "Scholar AI backend API.\n\n"
         "Auth bodies use JSON with snake_case field names "

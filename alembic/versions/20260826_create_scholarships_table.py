@@ -19,6 +19,11 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    if "scholarships" in inspector.get_table_names():
+        return
+
     op.create_table(
         "scholarships",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
@@ -177,8 +182,20 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_scholarships_country", table_name="scholarships")
-    op.drop_index("ix_scholarships_deadline", table_name="scholarships")
-    op.drop_index("ix_scholarships_source", table_name="scholarships")
-    op.drop_index("ix_scholarships_status", table_name="scholarships")
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    if "scholarships" not in inspector.get_table_names():
+        return
+
+    existing_indexes = {
+        index["name"] for index in inspector.get_indexes("scholarships") if index["name"]
+    }
+    for name in (
+        "ix_scholarships_country",
+        "ix_scholarships_deadline",
+        "ix_scholarships_source",
+        "ix_scholarships_status",
+    ):
+        if name in existing_indexes:
+            op.drop_index(name, table_name="scholarships")
     op.drop_table("scholarships")
