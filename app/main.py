@@ -7,13 +7,38 @@ from app.core.database import get_db, engine
 from app import models
 from app.api.auth import router as auth_router
 from app.api.profile import router as profile_router
+from app.api.scholarships import router as scholarships_router
 
 
 models.user.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="Scholar AI API",
-    version="1.0.0"
+    version="1.0.0",
+    description=(
+        "Scholar AI backend API.\n\n"
+        "Auth bodies use JSON with snake_case field names "
+        "(`full_name`, `email`, `password`). "
+        "Protected routes require a Bearer token from `/auth/login`."
+    ),
+    openapi_tags=[
+        {
+            "name": "Authentication",
+            "description": "Register, login, and password reset. Send JSON, not form data.",
+        },
+        {
+            "name": "Profile",
+            "description": "Student profile, work experience, and languages. Requires Bearer auth.",
+        },
+        {
+            "name": "Scholarships",
+            "description": "Ingested scholarship listings (duplicate check and create).",
+        },
+        {
+            "name": "System",
+            "description": "Health and service status.",
+        },
+    ],
 )
 
 
@@ -37,11 +62,14 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(profile_router)
-@app.get("/")
+app.include_router(scholarships_router)
+
+
+@app.get("/", tags=["System"], summary="API root")
 def root():
     return {"message": "Scholar AI API is Running!"}
 
 
-@app.get("/health")
+@app.get("/health", tags=["System"], summary="Health check")
 def health():
     return {"status": "ok"}

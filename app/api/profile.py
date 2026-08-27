@@ -21,10 +21,17 @@ router = APIRouter(
     tags=["Profile"]
 )
 
-# ==========================================
-# 1. إنشاء البروفايل لأول مرة
-# ==========================================
-@router.post("/", response_model=ProfileResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/",
+    response_model=ProfileResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create profile",
+    description="Creates the current user's profile. Requires Bearer token.",
+    responses={
+        400: {"description": "Profile already exists"},
+        401: {"description": "Missing or invalid Bearer token"},
+    },
+)
 def create_profile(
     profile_data: ProfileCreate, 
     db: Session = Depends(get_db), 
@@ -62,10 +69,15 @@ def create_profile(
     return new_profile
 
 
-# ==========================================
-# 2. جلب البروفايل الخاص بالمستخدم الحالي
-# ==========================================
-@router.get("/me", response_model=ProfileResponse)
+@router.get(
+    "/me",
+    response_model=ProfileResponse,
+    summary="Get current user profile",
+    responses={
+        401: {"description": "Missing or invalid Bearer token"},
+        404: {"description": "Profile not found"},
+    },
+)
 def get_my_profile(
     db: Session = Depends(get_db), 
     current_user: User = Depends(get_current_user)
@@ -79,10 +91,17 @@ def get_my_profile(
     return profile
 
 
-# ==========================================
-# 3. تحديث البيانات الأساسية للبروفايل
-# ==========================================
-@router.put("/me", response_model=ProfileResponse)
+@router.put(
+    "/me",
+    response_model=ProfileResponse,
+    summary="Update current user profile",
+    description="Partial update. Required profile fields cannot be set to null.",
+    responses={
+        401: {"description": "Missing or invalid Bearer token"},
+        404: {"description": "Profile not found"},
+        422: {"description": "Required field set to null or placeholder value"},
+    },
+)
 def update_profile(
     profile_data: ProfileUpdate, 
     db: Session = Depends(get_db), 
@@ -128,10 +147,16 @@ def update_profile(
     return profile
 
 
-# ==========================================
-# 4. إضافة خبرة عمل جديدة منفصلة
-# ==========================================
-@router.post("/experiences", response_model=WorkExperienceResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/experiences",
+    response_model=WorkExperienceResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Add work experience",
+    responses={
+        401: {"description": "Missing or invalid Bearer token"},
+        404: {"description": "Create a profile first"},
+    },
+)
 def add_experience(
     exp_data: WorkExperienceCreate, 
     db: Session = Depends(get_db), 
@@ -151,10 +176,16 @@ def add_experience(
     return new_exp
 
 
-# ==========================================
-# 5. إضافة لغة جديدة منفصلة
-# ==========================================
-@router.post("/languages", response_model=LanguageResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/languages",
+    response_model=LanguageResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Add language",
+    responses={
+        401: {"description": "Missing or invalid Bearer token"},
+        404: {"description": "Create a profile first"},
+    },
+)
 def add_language(
     lang_data: LanguageCreate, 
     db: Session = Depends(get_db), 

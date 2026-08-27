@@ -6,7 +6,8 @@ from app.core.database import get_db
 from app.models.user import User
 from app.schemas.user import (
     UserCreate, UserResponse, UserLogin, Token,
-    ForgotPasswordRequest, ResetPasswordRequest, ChangePasswordRequest
+    ForgotPasswordRequest, ResetPasswordRequest, ChangePasswordRequest,
+    MessageResponse,
 )
 from app.core.security import (
     hash_password, verify_password, create_access_token,
@@ -16,8 +17,21 @@ from app.core.mailer import send_reset_password_email
 
 router = APIRouter(prefix='/auth', tags=['Authentication'])
 
-# 1. التسجيل
-@router.post('/register', response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    '/register',
+    response_model=UserResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary='Register a new user',
+    description=(
+        'JSON body required. Fields: `full_name`, `email`, `password`. '
+        '`role` is optional and defaults to student. '
+        'Do not send `fullName` or form-data; missing `full_name` returns 422 Field required.'
+    ),
+    responses={
+        400: {"description": "Email already registered"},
+        422: {"description": "Validation error (missing or invalid fields)"},
+    },
+)
 def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
     existing_user = db.query(User).filter(User.email == user_data.email).first()
     if existing_user:
@@ -47,8 +61,16 @@ def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
         db.rollback()
         raise
 
-# 2. تسجيل الدخول
-@router.post('/login', response_model=Token)
+@router.post(
+    '/login',
+    response_model=Token,
+    summary='Login',
+    description='JSON body with `email` and `password`. Returns a Bearer access token.',
+    responses={
+        401: {"description": "Invalid email or password"},
+        422: {"description": "Validation error (missing email or password)"},
+    },
+)
 def login_user(
     user_data: UserLogin,
     db: Session = Depends(get_db)
@@ -71,8 +93,11 @@ def login_user(
     access_token = create_access_token(data={'sub': str(user.id), 'role': user.role})
     return {'access_token': access_token, 'token_type': 'bearer'}
 
-# 3. نسيان كلمة المرور (إرسال الإيميل)
-@router.post('/forgot-password')
+@router.post(
+    '/forgot-password',
+    response_model=MessageResponse,
+    summary='Request password reset email',
+)
 async def forgot_password(
     request: ForgotPasswordRequest, 
     background_tasks: BackgroundTasks, 
@@ -86,8 +111,15 @@ async def forgot_password(
     
     return {'message': 'إذا كان البريد مسجلاً، فقد تم إرسال رابط إعادة التعيين إلى إيميلك.'}
 
-# 4. إعادة تعيين كلمة المرور (استقبال التوكن + الكلمة الجديدة من الفرونت إند)
-@router.post('/reset-password')
+@router.post(
+    '/reset-password',
+    response_model=MessageResponse,
+    summary='Reset password with email token',
+    responses={
+        400: {"description": "Invalid or expired token"},
+        404: {"description": "User not found"},
+    },
+)
 def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db)):
     email = verify_reset_token(request.token)
     if not email:
@@ -104,8 +136,15 @@ def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db))
     db.commit()
     return {'message': 'تم تغيير كلمة المرور بنجاح! يمكنك الآن تسجيل الدخول.'}
 
-# 5. تغيير كلمة المرور (من داخل الحساب بعد تسجيل الدخول)
-@router.post('/change-password')
+@router.post(
+    '/change-password',
+    response_model=MessageResponse,
+    summary='Change password (authenticated)',
+    responses={
+        400: {"description": "Old password is incorrect"},
+        401: {"description": "Missing or invalid Bearer token"},
+    },
+)
 def change_password(
     data: ChangePasswordRequest,
     db: Session = Depends(get_db),

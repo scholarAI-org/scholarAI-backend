@@ -8,3 +8,8 @@ from app.schemas.profile import (
     LanguageCreate, 
     LanguageResponse
 )
+from app.schemas.Scholarship import (
+    ScholarshipCreate,
+    ScholarshipResponse,
+    ScholarshipExistsResponse,
+)
