@@ -19,7 +19,9 @@ class Settings(BaseSettings):
     MAIL_SERVER: Optional[str] = "smtp.gmail.com"
     MAIL_FROM_NAME: Optional[str] = "Scholar AI Support"
 
-    RESEND_API_KEY: str = "" 
+    RESEND_API_KEY: str = ""
+    EMAIL_VERIFICATION_OTP_EXPIRE_MINUTES: int = 10
+    EMAIL_VERIFICATION_OTP_RESEND_COOLDOWN_SECONDS: int = 60
     class Config:
         env_file = ".env"
         extra = "ignore"

@@ -1,3 +1,6 @@
+import logging
+from datetime import timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -5,21 +8,29 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.user import User
 from app.schemas.user import (
-    UserCreate, UserResponse, UserLogin, Token,
+    UserCreate, UserLogin, Token,
     ForgotPasswordRequest, ResetPasswordRequest, ChangePasswordRequest,
-    MessageResponse,
+    MessageResponse, VerifyEmailRequest, ResendVerificationOtpRequest,
 )
 from app.core.security import (
     hash_password, verify_password, create_access_token,
     create_reset_token, verify_reset_token, get_current_user
 )
-from app.core.mailer import send_reset_password_email
+from app.core.config import settings
+from app.core.mailer import send_reset_password_email, send_verification_otp_email
+from app.services.email_verification import (
+    clear_verification_otp,
+    issue_verification_otp,
+    otp_matches,
+    utc_now_naive,
+)
 
 router = APIRouter(prefix='/auth', tags=['Authentication'])
+logger = logging.getLogger("uvicorn.error")
 
 @router.post(
     '/register',
-    response_model=UserResponse,
+    response_model=MessageResponse,
     status_code=status.HTTP_201_CREATED,
     summary='Register a new user',
     description=(
@@ -29,6 +40,7 @@ router = APIRouter(prefix='/auth', tags=['Authentication'])
     ),
     responses={
         400: {"description": "Email already registered"},
+        503: {"description": "Database or email delivery unavailable"},
         422: {"description": "Validation error (missing or invalid fields)"},
     },
 )
@@ -47,14 +59,15 @@ def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
         full_name=user_data.full_name,
         email=user_data.email,
         hashed_password=hashed_pwd,
-        role=user_data.role if user_data.role else "student"
+        role=user_data.role if user_data.role else "student",
+        is_email_verified=False,
     )
+    otp = issue_verification_otp(new_user)
 
     try:
         db.add(new_user)
         db.commit()
         db.refresh(new_user)
-        return new_user
     except IntegrityError:
         db.rollback()
         raise HTTPException(
@@ -68,6 +81,23 @@ def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
             detail="تعذر إنشاء الحساب بسبب خطأ في قاعدة البيانات",
         )
 
+    try:
+        send_verification_otp_email(new_user.email, otp)
+    except Exception:
+        # Do not log the provider exception; it may echo the email body and OTP.
+        logger.error("Failed to send verification email to user id %s", new_user.id)
+        clear_verification_otp(new_user)
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Account created, but the verification email could not be sent. Please resend it.",
+        )
+
+    return {
+        "message": "Registration successful. Verification OTP sent to your email."
+    }
+
+
 @router.post(
     '/login',
     response_model=Token,
@@ -75,6 +105,7 @@ def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
     description='JSON body with `email` and `password`. Returns a Bearer access token.',
     responses={
         401: {"description": "Invalid email or password"},
+        403: {"description": "Email verification required"},
         422: {"description": "Validation error (missing email or password)"},
     },
 )
@@ -97,8 +128,130 @@ def login_user(
             detail='البريد الإلكتروني أو كلمة المرور غير صحيحة'
         )
     
+    if not user.is_email_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Email verification required",
+        )
+
     access_token = create_access_token(data={'sub': str(user.id), 'role': user.role})
     return {'access_token': access_token, 'token_type': 'bearer'}
+
+
+@router.post(
+    '/verify-email',
+    response_model=MessageResponse,
+    summary='Verify email with OTP',
+    responses={
+        400: {"description": "Invalid or expired OTP"},
+        422: {"description": "Invalid email or OTP format"},
+    },
+)
+def verify_email(request: VerifyEmailRequest, db: Session = Depends(get_db)):
+    user = (
+        db.query(User)
+        .filter(User.email == request.email)
+        .with_for_update()
+        .first()
+    )
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired OTP",
+        )
+
+    if user.is_email_verified:
+        return {"message": "Email verified successfully"}
+
+    now = utc_now_naive()
+    if (
+        not user.email_verification_otp_hash
+        or not user.email_verification_otp_expires_at
+        or user.email_verification_otp_expires_at <= now
+        or not otp_matches(request.otp, user.email_verification_otp_hash)
+    ):
+        if (
+            user.email_verification_otp_expires_at
+            and user.email_verification_otp_expires_at <= now
+        ):
+            clear_verification_otp(user)
+            db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired OTP",
+        )
+
+    user.is_email_verified = True
+    clear_verification_otp(user)
+    db.commit()
+    return {"message": "Email verified successfully"}
+
+
+@router.post(
+    '/resend-verification-otp',
+    response_model=MessageResponse,
+    summary='Resend email verification OTP',
+    responses={
+        429: {"description": "OTP was sent less than 60 seconds ago"},
+        503: {"description": "Verification email could not be sent"},
+    },
+)
+def resend_verification_otp(
+    request: ResendVerificationOtpRequest,
+    db: Session = Depends(get_db),
+):
+    user = (
+        db.query(User)
+        .filter(User.email == request.email)
+        .with_for_update()
+        .first()
+    )
+
+    # Keep the response generic so this endpoint cannot enumerate accounts.
+    if not user:
+        return {
+            "message": "If an unverified account exists, a verification OTP has been sent."
+        }
+
+    if user.is_email_verified:
+        return {"message": "Email is already verified"}
+
+    now = utc_now_naive()
+    cooldown = timedelta(
+        seconds=settings.EMAIL_VERIFICATION_OTP_RESEND_COOLDOWN_SECONDS
+    )
+    if (
+        user.email_verification_otp_sent_at
+        and now - user.email_verification_otp_sent_at < cooldown
+    ):
+        retry_after = max(
+            1,
+            int((cooldown - (now - user.email_verification_otp_sent_at)).total_seconds()),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Please wait before requesting another verification OTP",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    otp = issue_verification_otp(user, now=now)
+    db.commit()
+
+    try:
+        send_verification_otp_email(user.email, otp)
+    except Exception:
+        # Do not log the provider exception; it may echo the email body and OTP.
+        logger.error("Failed to resend verification email to user id %s", user.id)
+        clear_verification_otp(user)
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The verification email could not be sent. Please try again.",
+        )
+
+    return {"message": "Verification OTP sent to your email"}
+
 
 @router.post(
     '/forgot-password',
