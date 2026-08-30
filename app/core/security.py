@@ -1,7 +1,9 @@
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
+import os
 import jwt
 from typing import Optional
+from dotenv import load_dotenv
 
 # ➕ إضافة الاستيرادات الخاصة بـ FastAPI و Database من أجل دالة get_current_user
 from fastapi import Depends, HTTPException, status
@@ -22,7 +24,11 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
 # إعدادات الـ JWT (في المشاريع الحقيقية توضع هذه القيم في ملف .env)
-SECRET_KEY = "scholar_ai_super_secret_key_change_me_later"
+load_dotenv()
+
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError("SECRET_KEY must be set in the environment or .env file.")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 # التوكن ينتهي بعد 24 ساعة
 

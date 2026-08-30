@@ -1,10 +1,9 @@
 from app.schemas.user import UserCreate, UserResponse, Token
 from app.schemas.profile import (
-    ProfileCreate, 
-    ProfileUpdate, 
-    ProfileResponse, 
-    WorkExperienceCreate, 
-    WorkExperienceResponse, 
-    LanguageCreate, 
-    LanguageResponse
+    PersonalInfo,
+    AcademicInfo,
+    Documents,
+    SkillsAndLanguages,
+    PreferencesResponse,
+    UserProfile
 )

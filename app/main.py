@@ -1,15 +1,8 @@
 import os
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.orm import Session
-from sqlalchemy import text
-from app.core.database import get_db, engine
-from app import models
 from app.api.auth import router as auth_router
 from app.api.profile import router as profile_router
-
-
-models.user.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="Scholar AI API",

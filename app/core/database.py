@@ -1,6 +1,9 @@
 import os
+from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
+
+load_dotenv()
 
 # 1. قراءة رابط قاعدة البيانات من متغيرات البيئة (الخاصة بـ Render)
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -11,7 +14,7 @@ if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
 
 # 3. إذا لم يجد رابط سحابي (يعني أنكِ تعملين محلياً على جهازك)، استخدم الرابط المحلي
 if not DATABASE_URL:
-    DATABASE_URL = "postgresql://postgres:123456@localhost:5432/scholarai_db"
+    raise RuntimeError("DATABASE_URL must be set in the environment or .env file.")
 
 # إنشاء محرك الاتصال (Engine)
 engine = create_engine(DATABASE_URL)
