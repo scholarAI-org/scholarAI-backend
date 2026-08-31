@@ -36,6 +36,7 @@ class UserResponse(BaseModel):
     email: EmailStr
     role: str
     is_active: bool
+    is_email_verified: bool
 
     class Config:
         from_attributes = True
@@ -102,3 +103,16 @@ class ChangePasswordRequest(BaseModel):
             )
 
         return v
+
+
+class MessageResponse(BaseModel):
+    message: str
+
+
+class VerifyEmailRequest(BaseModel):
+    email: EmailStr
+    otp: str = Field(..., pattern=r"^\d{6}$")
+
+
+class ResendVerificationOtpRequest(BaseModel):
+    email: EmailStr
