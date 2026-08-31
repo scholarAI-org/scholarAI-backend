@@ -1,5 +1,5 @@
 from passlib.context import CryptContext
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import jwt
 from typing import Optional
 
@@ -28,14 +28,14 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 # التوكن ينتهي بعد 24 ساع
 
 def create_access_token(data: dict) -> str:
     to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
 # دالة لتوليد توكن إعادة التعيين ينتهي بعد 15 دقيقة
 def create_reset_token(email: str) -> str:
-    expire = datetime.utcnow() + timedelta(minutes=15)
+    expire = datetime.now(timezone.utc) + timedelta(minutes=15)
     to_encode = {"sub": email, "type": "reset"}
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
@@ -84,8 +84,8 @@ def get_current_user(
 
         user_id = int(user_id_str)
 
-    except (jwt.PyJWTError, ValueError, TypeError):
-        raise credentials_exception
+    except (jwt.PyJWTError, ValueError, TypeError) as exc:
+        raise credentials_exception from exc
 
     user = (
         db.query(User)
@@ -97,4 +97,4 @@ def get_current_user(
         raise credentials_exception
 
     return user
-# 
+#
