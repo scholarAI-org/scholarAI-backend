@@ -100,3 +100,13 @@ def change_password(
     current_user.hashed_password = hash_password(data.new_password)
     db.commit()
     return {'message': 'تم تغيير كلمة المرور بنجاح!'}
+
+@router.post("/logout", status_code=status.HTTP_200_OK, summary="تسجيل الخروج")
+async def logout(current_user: User = Depends(get_current_user)):
+    """
+    مسار تسجيل الخروج.
+    """
+    return {
+        "message": "تم تسجيل الخروج بنجاح",
+        "user_id": current_user.id
+    }
