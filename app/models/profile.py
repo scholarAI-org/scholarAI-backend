@@ -54,12 +54,6 @@ class FundingType(str, enum.Enum):
     ANY = "ANY"
 
 
-class PassportAvailability(str, enum.Enum):
-    AVAILABLE = "AVAILABLE"
-    IN_PROGRESS = "IN_PROGRESS"
-    NOT_AVAILABLE = "NOT_AVAILABLE"
-
-
 class ExperienceType(str, enum.Enum):
     WORK = "WORK"
     VOLUNTEER = "VOLUNTEER"
@@ -83,8 +77,7 @@ class Profile(Base):
     city = Column(String(100), nullable=True)
     financial_status = Column(Enum(FinancialStatus), nullable=True)
     id_number = Column(String(50), nullable=True)
-    passport_status = Column(Enum(PassportAvailability), default=PassportAvailability.NOT_AVAILABLE, nullable=True)
-
+    passport_number = Column(String(50), nullable=True)
     field_of_study = Column(Enum(FieldOfStudy), nullable=True)
     academic_level = Column(Enum(AcademicLevel), nullable=True)
     gpa_value = Column(Float, nullable=True)

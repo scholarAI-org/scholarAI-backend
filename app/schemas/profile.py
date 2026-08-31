@@ -53,7 +53,7 @@ class PersonalInfo(CamelModel):
     city: Optional[str] = None
     financial_status: Optional[FinancialStatus] = None
     id_number: str
-    passport_status: PassportAvailability = PassportAvailability.NOT_AVAILABLE
+    passport_number: Optional[str] = None
 
 
 class AcademicInfo(CamelModel):
