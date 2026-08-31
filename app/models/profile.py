@@ -121,7 +121,8 @@ class Profile(Base):
     documents = Column(JSON, default=dict)
 
     # Skills and Languages (JSON Object matching SkillsAndLanguages schema)
-    skills_and_languages = Column(JSON, default=dict)
+    languages_data = Column(JSON, default=list)
+    skills_data = Column(JSON, default=list)
 
     desired_degree_level = Column(Enum(DesiredDegreeLevel), nullable=True)
     funding_type = Column(Enum(FundingType), nullable=True)

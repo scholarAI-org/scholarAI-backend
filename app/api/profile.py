@@ -153,12 +153,23 @@ def update_personal_info(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
+    # 1. تحديث البريد الإلكتروني في كائن User إذا تغير
+    if data.email != current_user.email:
+        existing_user = db.query(User).filter(User.email == data.email).first()
+        if existing_user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="البريد الإلكتروني مستخدم بالفعل من قبل حساب آخر."
+            )
+        current_user.email = data.email
 
+    # 2. جلب الـ Profile أو إنشائه إن لم يكن موجوداً
+    profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
     if not profile:
         profile = Profile(user_id=current_user.id)
         db.add(profile)
 
+    # 3. تحديث بيانات الـ Profile
     profile.first_name = data.first_name
     profile.last_name = data.last_name
     profile.phone_number = data.phone_number
@@ -171,13 +182,15 @@ def update_personal_info(
     profile.id_number = data.id_number
     profile.passport_number = data.passport_number
 
+    # 4. حفظ التغييرات لكل من User و Profile
     db.commit()
+    db.refresh(current_user)
     db.refresh(profile)
 
     return PersonalInfo(
         first_name=profile.first_name,
         last_name=profile.last_name,
-        email=current_user.email,
+        email=current_user.email,  # سيعود الآن بالبريد الجديد بعد التحديث
         phone_number=profile.phone_number,
         gender=profile.gender,
         birth_date=profile.birth_date,

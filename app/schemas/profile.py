@@ -95,7 +95,7 @@ class LanguageProficiency(str, Enum):
 # ==========================================
 # 2. Sub-Schemas with Strict Validation Rules
 # ==========================================
-class PersonalInfoBase(BaseModel):
+class PersonalInfo(BaseModel):
     # إجباري
     first_name: str = Field(..., min_length=2, max_length=50)
     last_name: str = Field(..., min_length=2, max_length=50)
@@ -167,7 +167,7 @@ class GPA(BaseModel):
         return self
 
 
-class AcademicInfoBase(BaseModel):
+class AcademicInfo(BaseModel):
     academic_level: AcademicLevel
     field_of_study: FieldOfStudy
     institution: str = Field(..., min_length=2, max_length=255)
@@ -226,7 +226,7 @@ class SkillsAndLanguagesSuggestions(BaseModel):
 # ==========================================
 # 3. Experience Schemas
 # ==========================================
-class ExperienceBase(BaseModel):
+class Experience(BaseModel):
     experience_type: ExperienceType
     title: str = Field(..., min_length=2, max_length=250)
     organization: str = Field(..., min_length=2, max_length=250)
@@ -236,14 +236,14 @@ class ExperienceBase(BaseModel):
     description: Optional[str] = None
 
     @model_validator(mode="after")
-    def validate_dates(self) -> "ExperienceBase":
+    def validate_dates(self) -> "Experience":
         if not self.is_current and self.end_date is not None:
             if self.end_date < self.start_date:
                 raise ValueError("تاريخ النهاية يجب أن يكون بعد تاريخ البداية")
         return self
 
 
-class ExperienceCreate(ExperienceBase):
+class ExperienceCreate(Experience):
     pass
 
 
@@ -257,7 +257,7 @@ class ExperienceUpdate(BaseModel):
     description: Optional[str] = None
 
 
-class ExperienceResponse(ExperienceBase):
+class ExperienceResponse(Experience):
     id: int
 
     model_config = ConfigDict(from_attributes=True)
@@ -266,7 +266,7 @@ class ExperienceResponse(ExperienceBase):
 # ==========================================
 # 4. Preferences Schemas
 # ==========================================
-class PreferencesBase(BaseModel):
+class Preferences(BaseModel):
     desired_degree_level: DesiredDegreeLevel
     funding_type: FundingType
 
@@ -281,7 +281,7 @@ class PreferencesUpdate(BaseModel):
     preferred_countries: Optional[List[str]] = None
 
 
-class PreferencesResponse(PreferencesBase):
+class PreferencesResponse(Preferences):
     is_completed: bool = False
 
     model_config = ConfigDict(from_attributes=True)
@@ -301,8 +301,8 @@ class ProfileUpdate(BaseModel):
 class UserProfile(BaseModel):
     id: int
     user_id: int
-    personal_info: PersonalInfoBase
-    academic_info: AcademicInfoBase
+    personal_info: PersonalInfo
+    academic_info: AcademicInfo
     documents: Documents
     skills_and_languages: SkillsAndLanguages
     experiences: List[ExperienceResponse] = []
@@ -313,32 +313,52 @@ class UserProfile(BaseModel):
 
 
 def calculate_profile_completion(
-    personal_info: PersonalInfoBase,
-    academic_info: AcademicInfoBase,
+    personal_info: PersonalInfo,
+    academic_info: AcademicInfo,
     documents: Documents,
     skills_and_languages: SkillsAndLanguages,
     experiences: List[ExperienceResponse],
     preferences: PreferencesResponse,
 ) -> float:
-    total_sections = 6
+    """
+    حساب نسبة اكتمال الملف الشخصي بناءً على الحقول الإلزامية فقط.
+     الأقسام الإلزامية الأساسية:
+    1. المعلومات الشخصية الإلزامية (الاسم، الإيميل، تاريخ الميلاد، الجنس، الجنسية، بلد الإقامة).
+    2. المعلومات الأكاديمية (المستوى، التخصص، الجامعة/المؤسسة، المعدل).
+    3. التفضيلات الإلزامية (المستوى المرغوب، نوع التمويل).
+    """
+    total_sections = 3
     completed_sections = 0
 
-    if personal_info.first_name and personal_info.email and personal_info.passport_number:
+    # 1. المعلومات الشخصية (الحقول الإلزامية فقط - بدون جواز السفر أو الهاتف أو المدينة)
+    is_personal_complete = all([
+        personal_info.first_name,
+        personal_info.last_name,
+        personal_info.email,
+        personal_info.birth_date,
+        personal_info.gender,
+        personal_info.nationality,
+        personal_info.country_of_residence
+    ])
+    if is_personal_complete:
         completed_sections += 1
 
-    if academic_info.institution and academic_info.gpa.value:
+    # 2. البيانات الأكاديمية الإلزامية
+    is_academic_complete = all([
+        academic_info.academic_level,
+        academic_info.field_of_study,
+        academic_info.institution,
+        academic_info.gpa and academic_info.gpa.value is not None
+    ])
+    if is_academic_complete:
         completed_sections += 1
 
-    if documents.cv and documents.cv.status == UploadStatus.UPLOADED:
-        completed_sections += 1
-
-    if len(skills_and_languages.skills) > 0 or len(skills_and_languages.languages) > 0:
-        completed_sections += 1
-
-    if len(experiences) > 0:
-        completed_sections += 1
-
-    if preferences.desired_degree_level and preferences.funding_type:
+    # 3. التفضيلات الإلزامية
+    is_preferences_complete = all([
+        preferences.desired_degree_level,
+        preferences.funding_type
+    ])
+    if is_preferences_complete:
         completed_sections += 1
 
     return round((completed_sections / total_sections) * 100, 2)

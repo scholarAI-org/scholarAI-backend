@@ -5,12 +5,9 @@ from app.schemas.profile import (
     Documents,
     SkillsAndLanguages,
     PreferencesResponse,
-    UserProfile,
-    ProfileCreate, 
-    ProfileUpdate, 
-    ProfileResponse, 
-    WorkExperienceCreate, 
-    WorkExperienceResponse, 
-    LanguageCreate, 
-    LanguageResponse,
+    UserProfile,          # بدلاً من ProfileResponse
+    ProfileUpdate,
+    ExperienceCreate,     # بدلاً من WorkExperienceCreate
+    ExperienceResponse,   # بدلاً من WorkExperienceResponse
+    LanguageItem,         # بدلاً من LanguageCreate / LanguageResponse
 )
