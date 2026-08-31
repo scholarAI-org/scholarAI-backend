@@ -20,7 +20,6 @@ from app.schemas.profile import (
     GPA,
     GPAScale,
     LanguageItem,
-    PassportAvailability,
     PersonalInfo,
     PreferencesResponse,
     PreferencesUpdate,
@@ -33,6 +32,87 @@ from app.schemas.profile import (
 )
 
 router = APIRouter(prefix="/profile", tags=["Profile"])
+
+
+# ==========================================
+# Helper Function: Build Response & Calculate Completion
+# ==========================================
+def build_full_profile_response(profile: Profile, user: User) -> UserProfile:
+    personal_info = PersonalInfo(
+        first_name=profile.first_name or "",
+        last_name=profile.last_name or "",
+        email=user.email,
+        phone_number=profile.phone_number or "",
+        gender=profile.gender,
+        birth_date=profile.birth_date,
+        nationality=profile.nationality or "",
+        country_of_residence=profile.country_of_residence or "",
+        city=profile.city,
+        financial_status=profile.financial_status,
+        id_number=profile.id_number,
+        passport_number=profile.passport_number,
+    )
+
+    academic_info = AcademicInfo(
+        field_of_study=profile.field_of_study or FieldOfStudy.OTHER,
+        academic_level=profile.academic_level or AcademicLevel.BACHELOR,
+        gpa=GPA(
+            value=profile.gpa_value or 0.0,
+            scale=profile.gpa_scale or GPAScale.SCALE_100,
+        ),
+        institution=profile.institution or "",
+        current_study_language=profile.current_study_language or [],
+        expected_graduation_year=profile.expected_graduation_year,
+    )
+
+    documents_data = (
+        Documents.model_validate(profile.documents_data)
+        if profile.documents_data
+        else Documents()
+    )
+
+    languages_list = (
+        [LanguageItem(**lang) for lang in profile.languages_data]
+        if profile.languages_data
+        else []
+    )
+
+    skills_and_languages = SkillsAndLanguages(
+        languages=languages_list, skills=profile.skills_data or []
+    )
+
+    experiences_list = [
+        ExperienceResponse.model_validate(exp) for exp in (profile.experiences or [])
+    ]
+
+    preferences_data = PreferencesResponse(
+        desired_degree_level=profile.desired_degree_level,
+        funding_type=profile.funding_type,
+        preferred_fields_of_study=profile.preferred_fields_of_study or [],
+        preferred_countries=profile.preferred_countries or [],
+        is_profile_completed=bool(profile.desired_degree_level and profile.funding_type),
+    )
+
+    completion_percentage = calculate_profile_completion(
+        personal_info=personal_info,
+        academic_info=academic_info,
+        documents=documents_data,
+        skills_and_languages=skills_and_languages,
+        experiences=experiences_list,
+        preferences=preferences_data,
+    )
+
+    return UserProfile(
+        id=profile.id,
+        user_id=profile.user_id,
+        personal_info=personal_info,
+        academic_info=academic_info,
+        documents=documents_data,
+        skills_and_languages=skills_and_languages,
+        experiences=experiences_list,
+        preferences=preferences_data,
+        profile_completion_percentage=completion_percentage,
+    )
 
 
 # ==========================================
@@ -203,7 +283,7 @@ def get_documents(
     if not profile or not profile.documents_data:
         return Documents()
 
-    return Documents(**profile.documents_data)
+    return Documents.model_validate(profile.documents_data)
 
 
 @router.put("/documents", response_model=Documents)
@@ -238,8 +318,14 @@ def get_skills_and_languages(
     if not profile:
         return SkillsAndLanguages()
 
+    languages_list = (
+        [LanguageItem(**lang) for lang in profile.languages_data]
+        if profile.languages_data
+        else []
+    )
+
     return SkillsAndLanguages(
-        languages=profile.languages_data or [], skills=profile.skills_data or []
+        languages=languages_list, skills=profile.skills_data or []
     )
 
 
@@ -353,7 +439,7 @@ def update_experience(
 ):
     profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
     if not profile:
-        raise HTTPException(status_code=404, detail="Profile not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found")
 
     exp = (
         db.query(Experience)
@@ -361,7 +447,7 @@ def update_experience(
         .first()
     )
     if not exp:
-        raise HTTPException(status_code=404, detail="Experience item not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Experience item not found")
 
     exp.experience_type = data.experience_type
     exp.title = data.title
@@ -384,7 +470,7 @@ def delete_experience(
 ):
     profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
     if not profile:
-        raise HTTPException(status_code=404, detail="Profile not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found")
 
     exp = (
         db.query(Experience)
@@ -392,7 +478,7 @@ def delete_experience(
         .first()
     )
     if not exp:
-        raise HTTPException(status_code=404, detail="Experience item not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Experience item not found")
 
     db.delete(exp)
     db.commit()
@@ -416,7 +502,7 @@ def get_preferences(
         funding_type=profile.funding_type,
         preferred_fields_of_study=profile.preferred_fields_of_study or [],
         preferred_countries=profile.preferred_countries or [],
-        is_profile_completed=profile.is_completed,
+        is_profile_completed=bool(profile.desired_degree_level and profile.funding_type),
     )
 
 
@@ -436,7 +522,6 @@ def update_preferences(
     profile.funding_type = data.funding_type
     profile.preferred_fields_of_study = data.preferred_fields_of_study
     profile.preferred_countries = data.preferred_countries
-    profile.is_completed = True
 
     db.commit()
     db.refresh(profile)
@@ -446,7 +531,7 @@ def update_preferences(
         funding_type=profile.funding_type,
         preferred_fields_of_study=profile.preferred_fields_of_study,
         preferred_countries=profile.preferred_countries,
-        is_profile_completed=profile.is_completed,
+        is_profile_completed=bool(profile.desired_degree_level and profile.funding_type),
     )
 
 
@@ -459,105 +544,10 @@ def get_user_profile(
 ):
     profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
 
-    personal_info = PersonalInfo(
-        first_name=profile.first_name if profile else "",
-        last_name=profile.last_name if profile else "",
-        email=current_user.email,
-        phone_number=profile.phone_number if profile else "",
-        gender=profile.gender if profile and profile.gender else Gender.MALE,
-        birth_date=(
-            profile.birth_date if profile and profile.birth_date else date.today()
-        ),
-        nationality=profile.nationality if profile else "",
-        country_of_residence=profile.country_of_residence if profile else "",
-        city=profile.city if profile else None,
-        financial_status=profile.financial_status if profile else None,
-        id_number=profile.id_number if profile and profile.id_number else "",
-        passport_number=profile.passport_number if profile else None,
-    )
-
-    academic_info = AcademicInfo(
-        field_of_study=(
-            profile.field_of_study
-            if profile and profile.field_of_study
-            else FieldOfStudy.OTHER
-        ),
-        academic_level=(
-            profile.academic_level
-            if profile and profile.academic_level
-            else AcademicLevel.BACHELOR
-        ),
-        gpa=GPA(
-            value=profile.gpa_value if profile and profile.gpa_value else 0.0,
-            scale=(
-                profile.gpa_scale
-                if profile and profile.gpa_scale
-                else GPAScale.SCALE_100
-            ),
-        ),
-        institution=profile.institution if profile else "",
-        current_study_language=(
-            profile.current_study_language
-            if profile and profile.current_study_language
-            else []
-        ),
-        expected_graduation_year=(
-            profile.expected_graduation_year
-            if profile and profile.expected_graduation_year
-            else 2026
-        ),
-    )
-
-    documents_data = (
-        Documents.model_validate(profile.documents_data)
-        if (profile and profile.documents_data)
-        else Documents()
-    )
-
-    languages_list = (
-        [LanguageItem(**lang) for lang in profile.languages_data]
-        if (profile and profile.languages_data)
-        else []
-    )
-
-    skills_and_languages = SkillsAndLanguages(
-        languages=languages_list, skills=profile.skills_data or []
-    )
-
-    experiences_list = []
-    if profile:
-        experiences_db = (
-            db.query(Experience).filter(Experience.profile_id == profile.id).all()
+    if not profile:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Profile not found for current user.",
         )
-        experiences_list = [
-            ExperienceResponse.model_validate(exp) for exp in experiences_db
-        ]
 
-    preferences_data = PreferencesResponse(
-        desired_degree_level=profile.desired_degree_level if profile else None,
-        funding_type=profile.funding_type if profile else None,
-        preferred_fields_of_study=(
-            profile.preferred_fields_of_study if profile else []
-        ),
-        preferred_countries=profile.preferred_countries if profile else [],
-        is_profile_completed=profile.is_completed if profile else False,
-    )
-
-    completion_percentage = calculate_profile_completion(
-        personal_info,
-        academic_info,
-        documents_data,
-        skills_and_languages,
-        experiences_list,
-        preferences_data,
-    )
-
-    return UserProfile(
-        personal_info=personal_info,
-        academic_info=academic_info,
-        documents=documents_data,
-        skills_and_languages=skills_and_languages,
-        experiences=experiences_list,
-        preferences=preferences_data,
-        profile_completion_percentage=completion_percentage,
-    )
+    return build_full_profile_response(profile, current_user)

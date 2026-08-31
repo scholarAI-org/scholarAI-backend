@@ -1,0 +1,48 @@
+[33m92268d0[m[33m ([m[1;36mHEAD -> [m[1;32mfeature/profile-personal-info[m[33m, [m[1;31morigin/feature/profile-personal-info[m[33m)[m Refactor profile API and remove scholarship-related code
+[33m4eca828[m Merge branch 'feature/profile-personal-info' of https://github.com/scholarAI-org/scholarAI-backend into feature/profile-personal-info
+[33m2f01941[m refactor(profile): reorganize AcademicLevel and FieldOfStudy enums, change field_of_study to String(100)
+[33m27d4a06[m wip: make passport_number optional
+[33mb874d04[m Merge branch 'main' into feature/profile-personal-info
+[33m536009d[m[33m ([m[1;31morigin/main[m[33m, [m[1;32mmain[m[33m)[m  update Profile
+[33m0d003f0[m feat(db): sync schema with Alembic and apply migrations on deploy Add an idempotent users/profiles migration so the Neon database matches the models, skip creating scholarships if the table already exists, and run alembic upgrade head at startup instead of create_all.
+[33m707eed1[m fix docs error
+[33m396bea1[m[33m ([m[1;31morigin/fix/docs[m[33m)[m docs(openapi): sync Swagger with mounted routes and request contracts
+[33m2d32950[m[33m ([m[1;31morigin/DB/add-new-table[m[33m)[m Addnew table ScholerShip
+[33m322a9fc[m Merge pull request #9 from scholarAI-org/fix/deploy-taqat
+[33m98063a3[m[33m ([m[1;31morigin/fix/deploy-taqat[m[33m)[m add docker file for depolyment the app on taqat service
+[33m5cb403d[m Merge pull request #8 from scholarAI-org/fix/deploy-taqat
+[33m92ab218[m add docker file for depolyment the app on taqat service
+[33m621422a[m add docker file for depolyment the app on taqat service
+[33m9bd0940[m Merge pull request #7 from scholarAI-org/feature/scholarships
+[33m8a19e97[m Merge pull request #6 from scholarAI-org/feature/auth_profile
+[33mc8e489f[m test
+[33m953a115[m[33m ([m[1;31morigin/feature/scholarships[m[33m, [m[1;32mfeature/scholarships[m[33m)[m Add scholarships table model, schemas, and exists/create endpoints
+[33m87f5f67[m[33m ([m[1;31morigin/feature/auth_profile[m[33m, [m[1;32mfeature/auth_profile[m[33m)[m fix(profile): validate required fields and reject placeholder values
+[33mf841d5f[m Fix full_name missing in User model, schemas, and register endpoint
+[33m0a01adb[m Require essential student profile fields
+[33m76afb58[m Merge pull request #4 from scholarAI-org/feature/auth_profile
+[33maaf3ae6[m Merge main into auth profile and resolve conflicts
+[33mb432a8a[m Fix JWT bearer authentication for auth profile
+[33m02013cb[m fix: add missing SQLAlchemy imports in profile model
+[33m790b0c6[m fix: add missing SQLAlchemy imports in profile model
+[33m09a16f4[m Merge pull request #5 from scholarAI-org/ahmed/fix-for-railway-deploy
+[33m904d46d[m[33m ([m[1;31morigin/ahmed/fix-for-railway-deploy[m[33m)[m Merge branch 'main' into ahmed/fix-for-railway-deploy
+[33m8d5f784[m chore(fix): setup env for railway deployment
+[33m5f9429c[m Merge pull request #2 from scholarAI-org/feature/user-profile
+[33m7a2aa5a[m fix: add resend dependency to requirements.txt
+[33mde29686[m add email to profile and finish auth-system
+[33m7c42148[m[33m ([m[1;32mbackup-safe[m[33m)[m feat: implement forgot-password flow with Resend API
+[33m46a793c[m[33m ([m[1;32mfeature/auth-and-profile-updates[m[33m)[m Update auth.py
+[33mf82f9ee[m Update user.py
+[33m777c086[m[33m ([m[1;31morigin/feature/user-profile[m[33m, [m[1;32mfeature/user-profile[m[33m)[m Add profile feature, gpa_scale, and setup OAuth2 login authorization
+[33m6f31f31[m Update main.py
+[33m70e9662[m Add CORS middleware for frontend integration
+[33ma40a0ca[m Add CORSMiddleware to allow frontend local and production origins
+[33m9ae1e49[m Merge pull request #1 from scholarAI-org/feature/auth-system
+[33mdaca23f[m Support dynamic DATABASE_URL environment variable
+[33m73236b0[m Fix requirements.txt encoding to UTF-8
+[33md041065[m Add requirements.txt for deployment
+[33m7204b9b[m Remove venv dependencies and keep source code only
+[33m6674cc6[m Add authentication system and database configuration
+[33ma5ad59f[m Chore: reset repository to clean state
+[33m592d4f2[m Initial commit

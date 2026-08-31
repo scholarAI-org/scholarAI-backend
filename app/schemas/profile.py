@@ -1,43 +1,38 @@
-import enum
-
-from sqlalchemy import (
-    ARRAY,
-    JSON,
-    Boolean,
-    Column,
-    Date,
-    Enum,
-    Float,
-    ForeignKey,
-    Integer,
-    String,
-    Text,
+from datetime import date, datetime
+from enum import Enum
+from typing import Dict, List, Optional
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    field_validator,
+    model_validator,
 )
-from sqlalchemy.orm import relationship
-
-from app.core.database import Base
 
 
-class Gender(str, enum.Enum):
+# ==========================================
+# 1. Enums
+# ==========================================
+class Gender(str, Enum):
     MALE = "MALE"
     FEMALE = "FEMALE"
 
 
-class FinancialStatus(str, enum.Enum):
+class FinancialStatus(str, Enum):
     LIMITED = "LIMITED"
     MODERATE = "MODERATE"
     STABLE = "STABLE"
 
 
-class AcademicLevel(str, enum.Enum):
-    TAWJIHI = "TAWJIHI"  # الثانوية العامة / توجيهي
+class AcademicLevel(str, Enum):
+    TAWJIHI = "TAWJIHI"
     BACHELOR = "BACHELOR"
     MASTER = "MASTER"
     PHD = "PHD"
 
 
-class FieldOfStudy(str, enum.Enum):
-    # فروع التوجيهي / الثانوية العامة
+class FieldOfStudy(str, Enum):
     SCIENTIFIC = "SCIENTIFIC"
     LITERARY = "LITERARY"
     SHARIA = "SHARIA"
@@ -46,7 +41,6 @@ class FieldOfStudy(str, enum.Enum):
     AGRICULTURAL = "AGRICULTURAL"
     HOME_ECONOMICS = "HOME_ECONOMICS"
 
-    # التخصصات الجامعية والدراسات العليا
     ENGINEERING = "ENGINEERING"
     COMPUTER_SCIENCE = "COMPUTER_SCIENCE"
     MEDICINE = "MEDICINE"
@@ -55,14 +49,14 @@ class FieldOfStudy(str, enum.Enum):
     OTHER = "OTHER"
 
 
-class GPAScale(str, enum.Enum):
+class GPAScale(str, Enum):
     SCALE_4 = "SCALE_4"
     SCALE_5 = "SCALE_5"
     SCALE_10 = "SCALE_10"
     SCALE_100 = "SCALE_100"
 
 
-class DesiredDegreeLevel(str, enum.Enum):
+class DesiredDegreeLevel(str, Enum):
     BACHELOR = "BACHELOR"
     MASTER = "MASTER"
     PHD = "PHD"
@@ -70,82 +64,281 @@ class DesiredDegreeLevel(str, enum.Enum):
     OTHER = "OTHER"
 
 
-class FundingType(str, enum.Enum):
+class FundingType(str, Enum):
     FULL = "FULL"
     PARTIAL = "PARTIAL"
     SELF = "SELF"
     ANY = "ANY"
 
 
-class ExperienceType(str, enum.Enum):
+class ExperienceType(str, Enum):
     WORK = "WORK"
     VOLUNTEER = "VOLUNTEER"
     RESEARCH = "RESEARCH"
     STUDENT_ACTIVITY = "STUDENT_ACTIVITY"
 
 
-class Profile(Base):
-    __tablename__ = "profiles"
-
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(
-        Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False
-    )
-
-    # المعلومات الشخصية
-    first_name = Column(String(50), nullable=True)
-    last_name = Column(String(50), nullable=True)
-    phone_number = Column(String(30), nullable=True)
-    gender = Column(Enum(Gender), nullable=True)
-    birth_date = Column(Date, nullable=True)
-    nationality = Column(String(2), nullable=True)
-    country_of_residence = Column(String(2), nullable=True)
-    city = Column(String(100), nullable=True)
-    financial_status = Column(Enum(FinancialStatus), nullable=True)
-    id_number = Column(String(50), nullable=True)
-    passport_number = Column(String(50), nullable=True)  # حقل رقم الجواز اختياري
-
-    # المعلومات الأكاديمية
-    academic_level = Column(Enum(AcademicLevel), nullable=True)
-    field_of_study = Column(Enum(FieldOfStudy), nullable=True)
-    gpa_value = Column(Float, nullable=True)
-    gpa_scale = Column(Enum(GPAScale), nullable=True)
-    institution = Column(String(255), nullable=True)
-    current_study_language = Column(ARRAY(String), nullable=True)
-    expected_graduation_year = Column(Integer, nullable=True)
-
-    # بيانات مستندات ومهارات ولغات
-    documents_data = Column(JSON, nullable=True)
-    languages_data = Column(JSON, nullable=True)
-    skills_data = Column(JSON, nullable=True)
-
-    # تفضيلات المنح
-    desired_degree_level = Column(Enum(DesiredDegreeLevel), nullable=True)
-    funding_type = Column(Enum(FundingType), nullable=True)
-    preferred_fields_of_study = Column(JSON, default=list)
-    preferred_countries = Column(JSON, default=list)
-    is_completed = Column(Boolean, default=False)
-
-    # العلاقات (Relationships)
-    user = relationship("User", back_populates="profile")
-    experiences = relationship(
-        "Experience", back_populates="profile", cascade="all, delete-orphan"
-    )
+class UploadStatus(str, Enum):
+    NOT_UPLOADED = "NOT_UPLOADED"
+    UPLOADING = "UPLOADING"
+    UPLOADED = "UPLOADED"
+    FAILED = "FAILED"
 
 
-class Experience(Base):
-    __tablename__ = "experiences"
+class LanguageProficiency(str, Enum):
+    BEGINNER = "BEGINNER"
+    INTERMEDIATE = "INTERMEDIATE"
+    ADVANCED = "ADVANCED"
+    NATIVE = "NATIVE"
 
-    id = Column(Integer, primary_key=True, index=True)
-    profile_id = Column(
-        Integer, ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False
-    )
-    experience_type = Column(Enum(ExperienceType), nullable=False)
-    title = Column(String(250), nullable=False)
-    organization = Column(String(250), nullable=False)
-    start_date = Column(Date, nullable=False)
-    end_date = Column(Date, nullable=True)
-    is_current = Column(Boolean, default=False)
-    description = Column(Text, nullable=True)
 
-    profile = relationship("Profile", back_populates="experiences")
+# ==========================================
+# 2. Sub-Schemas with Strict Validation Rules
+# ==========================================
+class PersonalInfoBase(BaseModel):
+    # إجباري
+    first_name: str = Field(..., min_length=2, max_length=50)
+    last_name: str = Field(..., min_length=2, max_length=50)
+    email: EmailStr
+    birth_date: date
+    gender: Gender
+    nationality: str = Field(..., min_length=2, max_length=2, description="ISO 2-letter country code, e.g. PS")
+    country_of_residence: str = Field(..., min_length=2, max_length=2, description="ISO 2-letter country code")
+
+    # اختياري مفروض عليه Validation في حال وجوده
+    phone_number: Optional[str] = Field(None, pattern=r"^\+?[1-9]\d{7,14}$")
+    city: Optional[str] = Field(None, max_length=100)
+    financial_status: Optional[FinancialStatus] = None
+    id_number: Optional[str] = Field(None, pattern=r"^\d{9}$", description="Must be exactly 9 digits")
+    passport_number: Optional[str] = Field(None, pattern=r"^[A-Z0-9]{6,12}$")
+
+    @field_validator("birth_date")
+    @classmethod
+    def validate_age(cls, value: date) -> date:
+        today = date.today()
+        age = today.year - value.year - ((today.month, today.day) < (value.month, value.day))
+        if age < 15 or age > 80:
+            raise ValueError("العمر يجب أن يكون بين 15 و 80 سنة للتقديم على المنح")
+        return value
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PersonalInfoUpdate(BaseModel):
+    first_name: Optional[str] = Field(None, min_length=2, max_length=50)
+    last_name: Optional[str] = Field(None, min_length=2, max_length=50)
+    email: Optional[EmailStr] = None
+    birth_date: Optional[date] = None
+    gender: Optional[Gender] = None
+    nationality: Optional[str] = Field(None, min_length=2, max_length=2)
+    country_of_residence: Optional[str] = Field(None, min_length=2, max_length=2)
+    phone_number: Optional[str] = Field(None, pattern=r"^\+?[1-9]\d{7,14}$")
+    city: Optional[str] = Field(None, max_length=100)
+    financial_status: Optional[FinancialStatus] = None
+    id_number: Optional[str] = Field(None, pattern=r"^\d{9}$")
+    passport_number: Optional[str] = Field(None, pattern=r"^[A-Z0-9]{6,12}$")
+
+    @field_validator("birth_date")
+    @classmethod
+    def validate_age(cls, value: Optional[date]) -> Optional[date]:
+        if value is not None:
+            today = date.today()
+            age = today.year - value.year - ((today.month, today.day) < (value.month, value.day))
+            if age < 15 or age > 80:
+                raise ValueError("العمر يجب أن يكون بين 15 و 80 سنة للتقديم على المنح")
+        return value
+
+
+class GPA(BaseModel):
+    value: float = Field(..., ge=0.0)
+    scale: GPAScale
+
+    @model_validator(mode="after")
+    def validate_gpa_limits(self) -> "GPA":
+        limits = {
+            GPAScale.SCALE_4: 4.0,
+            GPAScale.SCALE_5: 5.0,
+            GPAScale.SCALE_10: 10.0,
+            GPAScale.SCALE_100: 100.0,
+        }
+        max_limit = limits.get(self.scale)
+        if max_limit and self.value > max_limit:
+            raise ValueError(f"قيمة المعدل {self.value} تتجاوز الحد الأقصى للسلم المختار ({max_limit})")
+        return self
+
+
+class AcademicInfoBase(BaseModel):
+    academic_level: AcademicLevel
+    field_of_study: FieldOfStudy
+    institution: str = Field(..., min_length=2, max_length=255)
+    gpa: GPA
+
+    current_study_language: List[str] = []
+    expected_graduation_year: Optional[int] = Field(None, ge=1990, le=2035)
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AcademicInfoUpdate(BaseModel):
+    academic_level: Optional[AcademicLevel] = None
+    field_of_study: Optional[FieldOfStudy] = None
+    institution: Optional[str] = Field(None, min_length=2, max_length=255)
+    gpa: Optional[GPA] = None
+    current_study_language: Optional[List[str]] = None
+    expected_graduation_year: Optional[int] = Field(None, ge=1990, le=2035)
+
+
+class UploadedFile(BaseModel):
+    status: UploadStatus = UploadStatus.NOT_UPLOADED
+    file_url: Optional[str] = None
+    file_name: Optional[str] = None
+    file_type: Optional[str] = None
+    file_size: Optional[int] = None
+    uploaded_at: Optional[datetime] = None
+
+
+class Documents(BaseModel):
+    cv: UploadedFile = Field(default_factory=UploadedFile)
+    transcript: UploadedFile = Field(default_factory=UploadedFile)
+    graduation_certificate: UploadedFile = Field(default_factory=UploadedFile)
+    passport: UploadedFile = Field(default_factory=UploadedFile)
+    recommendation_letters: List[UploadedFile] = Field(default_factory=list)
+    english_test: UploadedFile = Field(default_factory=UploadedFile)
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class LanguageItem(BaseModel):
+    name: str = Field(..., min_length=2, max_length=50)
+    proficiency: LanguageProficiency
+
+
+class SkillsAndLanguages(BaseModel):
+    languages: List[LanguageItem] = []
+    skills: List[str] = []
+
+
+class SkillsAndLanguagesSuggestions(BaseModel):
+    popular_languages: List[str]
+    suggested_skills_by_category: Dict[str, List[str]]
+
+
+# ==========================================
+# 3. Experience Schemas
+# ==========================================
+class ExperienceBase(BaseModel):
+    experience_type: ExperienceType
+    title: str = Field(..., min_length=2, max_length=250)
+    organization: str = Field(..., min_length=2, max_length=250)
+    start_date: date
+    end_date: Optional[date] = None
+    is_current: bool = False
+    description: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_dates(self) -> "ExperienceBase":
+        if not self.is_current and self.end_date is not None:
+            if self.end_date < self.start_date:
+                raise ValueError("تاريخ النهاية يجب أن يكون بعد تاريخ البداية")
+        return self
+
+
+class ExperienceCreate(ExperienceBase):
+    pass
+
+
+class ExperienceUpdate(BaseModel):
+    experience_type: Optional[ExperienceType] = None
+    title: Optional[str] = Field(None, min_length=2, max_length=250)
+    organization: Optional[str] = Field(None, min_length=2, max_length=250)
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    is_current: Optional[bool] = None
+    description: Optional[str] = None
+
+
+class ExperienceResponse(ExperienceBase):
+    id: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ==========================================
+# 4. Preferences Schemas
+# ==========================================
+class PreferencesBase(BaseModel):
+    desired_degree_level: DesiredDegreeLevel
+    funding_type: FundingType
+
+    preferred_fields_of_study: List[str] = []
+    preferred_countries: List[str] = []
+
+
+class PreferencesUpdate(BaseModel):
+    desired_degree_level: Optional[DesiredDegreeLevel] = None
+    funding_type: Optional[FundingType] = None
+    preferred_fields_of_study: Optional[List[str]] = None
+    preferred_countries: Optional[List[str]] = None
+
+
+class PreferencesResponse(PreferencesBase):
+    is_completed: bool = False
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ==========================================
+# 5. Full Profile Schemas & Completion Logic
+# ==========================================
+class ProfileUpdate(BaseModel):
+    personal_info: Optional[PersonalInfoUpdate] = None
+    academic_info: Optional[AcademicInfoUpdate] = None
+    documents: Optional[Documents] = None
+    skills_and_languages: Optional[SkillsAndLanguages] = None
+    preferences: Optional[PreferencesUpdate] = None
+
+
+class UserProfile(BaseModel):
+    id: int
+    user_id: int
+    personal_info: PersonalInfoBase
+    academic_info: AcademicInfoBase
+    documents: Documents
+    skills_and_languages: SkillsAndLanguages
+    experiences: List[ExperienceResponse] = []
+    preferences: PreferencesResponse
+    profile_completion_percentage: float = 0.0
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+def calculate_profile_completion(
+    personal_info: PersonalInfoBase,
+    academic_info: AcademicInfoBase,
+    documents: Documents,
+    skills_and_languages: SkillsAndLanguages,
+    experiences: List[ExperienceResponse],
+    preferences: PreferencesResponse,
+) -> float:
+    total_sections = 6
+    completed_sections = 0
+
+    if personal_info.first_name and personal_info.email and personal_info.passport_number:
+        completed_sections += 1
+
+    if academic_info.institution and academic_info.gpa.value:
+        completed_sections += 1
+
+    if documents.cv and documents.cv.status == UploadStatus.UPLOADED:
+        completed_sections += 1
+
+    if len(skills_and_languages.skills) > 0 or len(skills_and_languages.languages) > 0:
+        completed_sections += 1
+
+    if len(experiences) > 0:
+        completed_sections += 1
+
+    if preferences.desired_degree_level and preferences.funding_type:
+        completed_sections += 1
+
+    return round((completed_sections / total_sections) * 100, 2)
