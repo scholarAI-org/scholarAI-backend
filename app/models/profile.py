@@ -1,6 +1,18 @@
 import enum
 
-from sqlalchemy import ARRAY, JSON, Boolean, Column, Date, Enum, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    ARRAY,
+    JSON,
+    Boolean,
+    Column,
+    Date,
+    Enum,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
@@ -18,7 +30,7 @@ class FinancialStatus(str, enum.Enum):
 
 
 class AcademicLevel(str, enum.Enum):
-    TAWJIHI = "TAWJIHI"  # إضافة التوجيهي / الثانوية العامة
+    TAWJIHI = "TAWJIHI"  # توجيهي / ثانوية عامة
     BACHELOR = "BACHELOR"
     MASTER = "MASTER"
     PHD = "PHD"
@@ -76,7 +88,9 @@ class Profile(Base):
     __tablename__ = "profiles"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False
+    )
 
     first_name = Column(String(50), nullable=True)
     last_name = Column(String(50), nullable=True)
@@ -90,8 +104,8 @@ class Profile(Base):
     id_number = Column(String(50), nullable=True)
     passport_number = Column(String(50), nullable=True)
 
-    # تغيير FieldOfStudy إلى String(100) ليكون أكثر مرونة لجميع التخصصات والفروع
-    field_of_study = Column(String(100), nullable=True)
+    # ضبط النوع ليكون Enum(FieldOfStudy) ليتوافق مع Pydantic والموديل
+    field_of_study = Column(Enum(FieldOfStudy), nullable=True)
     academic_level = Column(Enum(AcademicLevel), nullable=True)
     gpa_value = Column(Float, nullable=True)
     gpa_scale = Column(Enum(GPAScale), nullable=True)
@@ -110,14 +124,18 @@ class Profile(Base):
     is_completed = Column(Boolean, default=False)
 
     user = relationship("User", back_populates="profile")
-    experiences = relationship("Experience", back_populates="profile", cascade="all, delete-orphan")
+    experiences = relationship(
+        "Experience", back_populates="profile", cascade="all, delete-orphan"
+    )
 
 
 class Experience(Base):
     __tablename__ = "experiences"
 
     id = Column(Integer, primary_key=True, index=True)
-    profile_id = Column(Integer, ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False)
+    profile_id = Column(
+        Integer, ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False
+    )
     experience_type = Column(Enum(ExperienceType), nullable=False)
     title = Column(String(250), nullable=False)
     organization = Column(String(250), nullable=False)

@@ -14,8 +14,3 @@ from app.schemas.profile import (
     LanguageCreate, 
     LanguageResponse,
 )
-from app.schemas.scholarship import (
-    ScholarshipCreate,
-    ScholarshipResponse,
-    ScholarshipExistsResponse,
-)

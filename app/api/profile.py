@@ -1,43 +1,51 @@
-from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
-from sqlalchemy.orm import Session
+from datetime import date, datetime, timezone
 from typing import List
-from datetime import date, datetime
-from app.core.database import get_db
-from app.models.user import User
-from app.core.security import get_current_user
-from app.models.profile import Profile, Experience
 
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from sqlalchemy.orm import Session
+
+from app.core.database import get_db
+from app.core.security import get_current_user
+from app.models.profile import Experience, Profile
+from app.models.user import User
 from app.schemas.profile import (
-    PersonalInfo, AcademicInfo, GPA, Documents, UploadedFile, UploadStatus, UserProfile,
-    Gender,
-    FieldOfStudy,
+    AcademicInfo,
     AcademicLevel,
+    Documents,
+    ExperienceCreate,
+    ExperienceResponse,
+    ExperienceUpdate,
+    FieldOfStudy,
+    Gender,
+    GPA,
     GPAScale,
-    calculate_profile_completion,
+    LanguageItem,
+    PassportAvailability,
+    PersonalInfo,
+    PreferencesResponse,
+    PreferencesUpdate,
     SkillsAndLanguages,
     SkillsAndLanguagesSuggestions,
-    ExperienceCreate, ExperienceUpdate, ExperienceResponse, PreferencesUpdate, PreferencesResponse,
-    LanguageItem, PassportAvailability
+    UploadedFile,
+    UploadStatus,
+    UserProfile,
+    calculate_profile_completion,
 )
 
-router = APIRouter(
-    prefix="/profile",
-    tags=["Profile"]
-)
+router = APIRouter(prefix="/profile", tags=["Profile"])
+
 
 # ==========================================
 # GET /profile/personal-info
 # ==========================================
 @router.get("/personal-info", response_model=PersonalInfo)
 def get_personal_info(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
 ):
     profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
     if not profile:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Profile not found."
+            status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found."
         )
 
     return PersonalInfo(
@@ -51,8 +59,8 @@ def get_personal_info(
         country_of_residence=profile.country_of_residence or "",
         city=profile.city,
         financial_status=profile.financial_status,
-        id_number=profile.id_number if profile else None,
-        passport_status=profile.passport_status
+        id_number=profile.id_number,
+        passport_number=profile.passport_number,
     )
 
 
@@ -63,7 +71,7 @@ def get_personal_info(
 def update_personal_info(
     data: PersonalInfo,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
 
@@ -71,7 +79,6 @@ def update_personal_info(
         profile = Profile(user_id=current_user.id)
         db.add(profile)
 
-    profile.full_name = f"{data.first_name} {data.last_name}".strip()
     profile.first_name = data.first_name
     profile.last_name = data.last_name
     profile.phone_number = data.phone_number
@@ -82,7 +89,7 @@ def update_personal_info(
     profile.city = data.city
     profile.financial_status = data.financial_status
     profile.id_number = data.id_number
-    profile.passport_status = data.passport_status
+    profile.passport_number = data.passport_number
 
     db.commit()
     db.refresh(profile)
@@ -99,22 +106,22 @@ def update_personal_info(
         city=profile.city,
         financial_status=profile.financial_status,
         id_number=profile.id_number,
-        passport_status=profile.passport_status
+        passport_number=profile.passport_number,
     )
+
 
 # ==========================================
 # GET /profile/academic-info
 # ==========================================
 @router.get("/academic-info", response_model=AcademicInfo)
 def get_academic_info(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
 ):
     profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
     if not profile or not profile.field_of_study:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Academic information not found."
+            detail="Academic information not found.",
         )
 
     return AcademicInfo(
@@ -123,7 +130,7 @@ def get_academic_info(
         gpa=GPA(value=profile.gpa_value, scale=profile.gpa_scale),
         institution=profile.institution or "",
         current_study_language=profile.current_study_language or [],
-        expected_graduation_year=profile.expected_graduation_year
+        expected_graduation_year=profile.expected_graduation_year,
     )
 
 
@@ -134,7 +141,7 @@ def get_academic_info(
 def update_academic_info(
     data: AcademicInfo,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
 
@@ -159,21 +166,23 @@ def update_academic_info(
         gpa=GPA(value=profile.gpa_value, scale=profile.gpa_scale),
         institution=profile.institution,
         current_study_language=profile.current_study_language,
-        expected_graduation_year=profile.expected_graduation_year
+        expected_graduation_year=profile.expected_graduation_year,
     )
 
+
 # ==========================================
-# 1. Endpoint رفع الملفات الفعلي
+# Upload / Documents Endpoints
 # ==========================================
 @router.post("/documents/upload", response_model=UploadedFile)
 def upload_document(
-    file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user)
+    file: UploadFile = File(...), current_user: User = Depends(get_current_user)
 ):
     file_content = file.file.read()
     file_size = len(file_content)
-    
-    fake_file_url = f"https://storage.scholarai.com/uploads/{current_user.id}/{file.filename}"
+
+    fake_file_url = (
+        f"https://storage.scholarai.com/uploads/{current_user.id}/{file.filename}"
+    )
 
     return UploadedFile(
         status=UploadStatus.UPLOADED,
@@ -181,34 +190,27 @@ def upload_document(
         file_name=file.filename,
         file_type=file.content_type,
         file_size=file_size,
-        uploaded_at=datetime.utcnow()
+        uploaded_at=datetime.now(timezone.utc),
     )
 
 
-# ==========================================
-# 2. GET /profile/documents
-# ==========================================
 @router.get("/documents", response_model=Documents)
 def get_documents(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
 ):
     profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
-    
+
     if not profile or not profile.documents_data:
         return Documents()
 
     return Documents(**profile.documents_data)
 
 
-# ==========================================
-# 3. PUT /profile/documents
-# ==========================================
 @router.put("/documents", response_model=Documents)
 def update_documents(
     data: Documents,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
 
@@ -225,12 +227,11 @@ def update_documents(
 
 
 # ==========================================
-# 1. GET /profile/skills-and-languages
+# Skills & Languages Endpoints
 # ==========================================
 @router.get("/skills-and-languages", response_model=SkillsAndLanguages)
 def get_skills_and_languages(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
 ):
     profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
 
@@ -238,36 +239,45 @@ def get_skills_and_languages(
         return SkillsAndLanguages()
 
     return SkillsAndLanguages(
-        languages=profile.languages_data or [],
-        skills=profile.skills_data or []
+        languages=profile.languages_data or [], skills=profile.skills_data or []
     )
 
 
-# ==========================================
-# 2. GET /profile/skills-and-languages/suggestions
-# ==========================================
-@router.get("/skills-and-languages/suggestions", response_model=SkillsAndLanguagesSuggestions)
+@router.get(
+    "/skills-and-languages/suggestions",
+    response_model=SkillsAndLanguagesSuggestions,
+)
 def get_suggestions():
     return SkillsAndLanguagesSuggestions(
         popular_languages=[
-            "العربية", "الإنجليزيّة", "التركية", "الفرنسية", "الإسبانية", "الألمانية"
+            "العربية",
+            "الإنجليزيّة",
+            "التركية",
+            "الفرنسية",
+            "الإسبانية",
+            "الألمانية",
         ],
         suggested_skills_by_category={
-            "تقنية": ["JavaScript", "Python", "React", "Node.js", "Docker", "Power BI", "Data Analysis"],
+            "تقنية": [
+                "JavaScript",
+                "Python",
+                "React",
+                "Node.js",
+                "Docker",
+                "Power BI",
+                "Data Analysis",
+            ],
             "تواصل": ["التواصل الفعال", "إدارة الوقت", "العمل الجماعي", "القيادة"],
-            "أخرى": ["إدارة المشاريع", "حل المشكلات", "التفكير النقدي"]
-        }
+            "أخرى": ["إدارة المشاريع", "حل المشكلات", "التفكير النقدي"],
+        },
     )
 
 
-# ==========================================
-# 3. PUT /profile/skills-and-languages
-# ==========================================
 @router.put("/skills-and-languages", response_model=SkillsAndLanguages)
 def update_skills_and_languages(
     data: SkillsAndLanguages,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
 
@@ -275,7 +285,9 @@ def update_skills_and_languages(
         profile = Profile(user_id=current_user.id)
         db.add(profile)
 
-    profile.languages_data = [lang.model_dump(mode="json", by_alias=True) for lang in data.languages]
+    profile.languages_data = [
+        lang.model_dump(mode="json", by_alias=True) for lang in data.languages
+    ]
     profile.skills_data = data.skills
 
     db.commit()
@@ -285,28 +297,28 @@ def update_skills_and_languages(
 
 
 # ==========================================
-# 1. GET /profile/experiences
+# Experiences Endpoints
 # ==========================================
 @router.get("/experiences", response_model=List[ExperienceResponse])
 def get_experiences(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
 ):
     profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
     if not profile:
         return []
-    
+
     return db.query(Experience).filter(Experience.profile_id == profile.id).all()
 
 
-# ==========================================
-# 2. POST /profile/experiences
-# ==========================================
-@router.post("/experiences", response_model=ExperienceResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/experiences",
+    response_model=ExperienceResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 def create_experience(
     data: ExperienceCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
     if not profile:
@@ -323,30 +335,31 @@ def create_experience(
         start_date=data.start_date,
         end_date=None if data.is_current else data.end_date,
         is_current=data.is_current,
-        description=data.description
+        description=data.description,
     )
-    
+
     db.add(new_exp)
     db.commit()
     db.refresh(new_exp)
     return new_exp
 
 
-# ==========================================
-# 3. PUT /profile/experiences/{exp_id}
-# ==========================================
 @router.put("/experiences/{exp_id}", response_model=ExperienceResponse)
 def update_experience(
     exp_id: int,
     data: ExperienceUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
 
-    exp = db.query(Experience).filter(Experience.id == exp_id, Experience.profile_id == profile.id).first()
+    exp = (
+        db.query(Experience)
+        .filter(Experience.id == exp_id, Experience.profile_id == profile.id)
+        .first()
+    )
     if not exp:
         raise HTTPException(status_code=404, detail="Experience item not found")
 
@@ -363,20 +376,21 @@ def update_experience(
     return exp
 
 
-# ==========================================
-# 4. DELETE /profile/experiences/{exp_id}
-# ==========================================
 @router.delete("/experiences/{exp_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_experience(
     exp_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
 
-    exp = db.query(Experience).filter(Experience.id == exp_id, Experience.profile_id == profile.id).first()
+    exp = (
+        db.query(Experience)
+        .filter(Experience.id == exp_id, Experience.profile_id == profile.id)
+        .first()
+    )
     if not exp:
         raise HTTPException(status_code=404, detail="Experience item not found")
 
@@ -386,15 +400,14 @@ def delete_experience(
 
 
 # ==========================================
-# 1. GET /profile/preferences
+# Preferences Endpoints
 # ==========================================
 @router.get("/preferences", response_model=PreferencesResponse)
 def get_preferences(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
 ):
     profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
-    
+
     if not profile:
         return PreferencesResponse()
 
@@ -403,18 +416,15 @@ def get_preferences(
         funding_type=profile.funding_type,
         preferred_fields_of_study=profile.preferred_fields_of_study or [],
         preferred_countries=profile.preferred_countries or [],
-        is_profile_completed=profile.is_completed
+        is_profile_completed=profile.is_completed,
     )
 
 
-# ==========================================
-# 2. PUT /profile/preferences
-# ==========================================
 @router.put("/preferences", response_model=PreferencesResponse)
 def update_preferences(
     data: PreferencesUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
 
@@ -436,7 +446,7 @@ def update_preferences(
         funding_type=profile.funding_type,
         preferred_fields_of_study=profile.preferred_fields_of_study,
         preferred_countries=profile.preferred_countries,
-        is_profile_completed=profile.is_completed
+        is_profile_completed=profile.is_completed,
     )
 
 
@@ -445,8 +455,7 @@ def update_preferences(
 # ==========================================
 @router.get("", response_model=UserProfile)
 def get_user_profile(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
 ):
     profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
 
@@ -456,49 +465,82 @@ def get_user_profile(
         email=current_user.email,
         phone_number=profile.phone_number if profile else "",
         gender=profile.gender if profile and profile.gender else Gender.MALE,
-        birth_date=profile.birth_date if profile and profile.birth_date else date.today(),
+        birth_date=(
+            profile.birth_date if profile and profile.birth_date else date.today()
+        ),
         nationality=profile.nationality if profile else "",
         country_of_residence=profile.country_of_residence if profile else "",
         city=profile.city if profile else None,
         financial_status=profile.financial_status if profile else None,
         id_number=profile.id_number if profile and profile.id_number else "",
-        passport_status=(
-            profile.passport_status
-            if profile and profile.passport_status
-            else PassportAvailability.NOT_AVAILABLE
-        )
+        passport_number=profile.passport_number if profile else None,
     )
 
     academic_info = AcademicInfo(
-        field_of_study=profile.field_of_study if profile and profile.field_of_study else FieldOfStudy.OTHER,
-        academic_level=profile.academic_level if profile and profile.academic_level else AcademicLevel.BACHELOR,
+        field_of_study=(
+            profile.field_of_study
+            if profile and profile.field_of_study
+            else FieldOfStudy.OTHER
+        ),
+        academic_level=(
+            profile.academic_level
+            if profile and profile.academic_level
+            else AcademicLevel.BACHELOR
+        ),
         gpa=GPA(
             value=profile.gpa_value if profile and profile.gpa_value else 0.0,
-            scale=profile.gpa_scale if profile and profile.gpa_scale else GPAScale.SCALE_100
+            scale=(
+                profile.gpa_scale
+                if profile and profile.gpa_scale
+                else GPAScale.SCALE_100
+            ),
         ),
         institution=profile.institution if profile else "",
-        current_study_language=profile.current_study_language if profile and profile.current_study_language else [],
-        expected_graduation_year=profile.expected_graduation_year if profile and profile.expected_graduation_year else 2026
+        current_study_language=(
+            profile.current_study_language
+            if profile and profile.current_study_language
+            else []
+        ),
+        expected_graduation_year=(
+            profile.expected_graduation_year
+            if profile and profile.expected_graduation_year
+            else 2026
+        ),
     )
 
-    documents_data = Documents.model_validate(profile.documents_data) if (profile and profile.documents_data) else Documents()
-    languages_list = [LanguageItem(**lang) for lang in profile.languages_data] if (profile and profile.languages_data) else []
+    documents_data = (
+        Documents.model_validate(profile.documents_data)
+        if (profile and profile.documents_data)
+        else Documents()
+    )
+
+    languages_list = (
+        [LanguageItem(**lang) for lang in profile.languages_data]
+        if (profile and profile.languages_data)
+        else []
+    )
+
     skills_and_languages = SkillsAndLanguages(
-        languages=languages_list,
-        skills=profile.skills_data or []
-    ) 
+        languages=languages_list, skills=profile.skills_data or []
+    )
 
     experiences_list = []
     if profile:
-        experiences_db = db.query(Experience).filter(Experience.profile_id == profile.id).all()
-        experiences_list = [ExperienceResponse.model_validate(exp) for exp in experiences_db]
+        experiences_db = (
+            db.query(Experience).filter(Experience.profile_id == profile.id).all()
+        )
+        experiences_list = [
+            ExperienceResponse.model_validate(exp) for exp in experiences_db
+        ]
 
     preferences_data = PreferencesResponse(
         desired_degree_level=profile.desired_degree_level if profile else None,
         funding_type=profile.funding_type if profile else None,
-        preferred_fields_of_study=profile.preferred_fields_of_study if profile else [],
+        preferred_fields_of_study=(
+            profile.preferred_fields_of_study if profile else []
+        ),
         preferred_countries=profile.preferred_countries if profile else [],
-        is_profile_completed=profile.is_completed if profile else False
+        is_profile_completed=profile.is_completed if profile else False,
     )
 
     completion_percentage = calculate_profile_completion(
@@ -507,7 +549,7 @@ def get_user_profile(
         documents_data,
         skills_and_languages,
         experiences_list,
-        preferences_data
+        preferences_data,
     )
 
     return UserProfile(
@@ -517,5 +559,5 @@ def get_user_profile(
         skills_and_languages=skills_and_languages,
         experiences=experiences_list,
         preferences=preferences_data,
-        profile_completion_percentage=completion_percentage
+        profile_completion_percentage=completion_percentage,
     )
