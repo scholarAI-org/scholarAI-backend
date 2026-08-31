@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status,File,UploadFile
+from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
 from sqlalchemy.orm import Session
 from typing import List
 from datetime import date, datetime
@@ -7,19 +7,18 @@ from app.models.user import User
 from app.core.security import get_current_user
 from app.models.profile import Profile, Experience
 
-from app.schemas.profile import( PersonalInfo ,AcademicInfo, GPA,Documents, UploadedFile, UploadStatus,UserProfile,
+from app.schemas.profile import (
+    PersonalInfo, AcademicInfo, GPA, Documents, UploadedFile, UploadStatus, UserProfile,
     Gender,
     FieldOfStudy,
     AcademicLevel,
     GPAScale,
-    GPA,
     calculate_profile_completion,
     SkillsAndLanguages,
     SkillsAndLanguagesSuggestions,
-    ExperienceCreate, ExperienceUpdate, ExperienceResponse,PreferencesUpdate, PreferencesResponse,
+    ExperienceCreate, ExperienceUpdate, ExperienceResponse, PreferencesUpdate, PreferencesResponse,
     LanguageItem, PassportAvailability
-    )
-from app.core.security import get_current_user  # دالة التحقق من التوكن للمستخدم الحالي
+)
 
 router = APIRouter(
     prefix="/profile",
@@ -41,7 +40,6 @@ def get_personal_info(
             detail="Profile not found."
         )
 
-    # تجهيز كائن الاستجابة دمجاً بين البروفايل وإيميل المستخدم من جدول User
     return PersonalInfo(
         first_name=profile.first_name or "",
         last_name=profile.last_name or "",
@@ -55,7 +53,6 @@ def get_personal_info(
         financial_status=profile.financial_status,
         id_number=profile.id_number if profile else None,
         passport_status=profile.passport_status
-        
     )
 
 
@@ -70,12 +67,11 @@ def update_personal_info(
 ):
     profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
 
-    # إذا لم يكن لديه بروفايل مسبقاً، يتم إنشاؤه
     if not profile:
         profile = Profile(user_id=current_user.id)
         db.add(profile)
 
-    # تحديث حقول البروفايل باستثناء الإيميل (لأنه يتبع لجدول User)
+    profile.full_name = f"{data.first_name} {data.last_name}".strip()
     profile.first_name = data.first_name
     profile.last_name = data.last_name
     profile.phone_number = data.phone_number
@@ -105,6 +101,7 @@ def update_personal_info(
         id_number=profile.id_number,
         passport_status=profile.passport_status
     )
+
 # ==========================================
 # GET /profile/academic-info
 # ==========================================
@@ -164,21 +161,18 @@ def update_academic_info(
         current_study_language=profile.current_study_language,
         expected_graduation_year=profile.expected_graduation_year
     )
+
 # ==========================================
-# 1. Endpoint رفع الملفات الفعلي (Multipart Form)
+# 1. Endpoint رفع الملفات الفعلي
 # ==========================================
 @router.post("/documents/upload", response_model=UploadedFile)
 def upload_document(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user)
 ):
-    # هنا يتم رفع الملف إلى خدمة التخزين السحابي (مثل S3 أو Supabase أو حتى مجلد محلي)
-    # سنقوم بإنشاء رابط افتراضي للتجربة
-    
     file_content = file.file.read()
     file_size = len(file_content)
     
-    # رابط وهمي للملف بعد الرفع (يمكن استبداله بـ S3 Upload logic)
     fake_file_url = f"https://storage.scholarai.com/uploads/{current_user.id}/{file.filename}"
 
     return UploadedFile(
@@ -202,7 +196,6 @@ def get_documents(
     profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
     
     if not profile or not profile.documents_data:
-        # إرجاع كائن فارغ بالحالات الافتراضية
         return Documents()
 
     return Documents(**profile.documents_data)
@@ -223,15 +216,16 @@ def update_documents(
         profile = Profile(user_id=current_user.id)
         db.add(profile)
 
-    # حفظ بيانات الوثائق كـ JSON
     profile.documents_data = data.model_dump(mode="json", by_alias=True)
 
     db.commit()
     db.refresh(profile)
 
     return data
+
+
 # ==========================================
-# 1. GET /profile/skills-and-languages (جلب بيانات الطالب)
+# 1. GET /profile/skills-and-languages
 # ==========================================
 @router.get("/skills-and-languages", response_model=SkillsAndLanguages)
 def get_skills_and_languages(
@@ -250,7 +244,7 @@ def get_skills_and_languages(
 
 
 # ==========================================
-# 2. GET /profile/skills-and-languages/suggestions (تغذية الـ Modals بالخيارات)
+# 2. GET /profile/skills-and-languages/suggestions
 # ==========================================
 @router.get("/skills-and-languages/suggestions", response_model=SkillsAndLanguagesSuggestions)
 def get_suggestions():
@@ -267,7 +261,7 @@ def get_suggestions():
 
 
 # ==========================================
-# 3. PUT /profile/skills-and-languages (حفظ التعديلات عند الضغط على "متابعة")
+# 3. PUT /profile/skills-and-languages
 # ==========================================
 @router.put("/skills-and-languages", response_model=SkillsAndLanguages)
 def update_skills_and_languages(
@@ -291,7 +285,7 @@ def update_skills_and_languages(
 
 
 # ==========================================
-# 1. GET /profile/experiences (جلب قائمة الخبرات)
+# 1. GET /profile/experiences
 # ==========================================
 @router.get("/experiences", response_model=List[ExperienceResponse])
 def get_experiences(
@@ -306,7 +300,7 @@ def get_experiences(
 
 
 # ==========================================
-# 2. POST /profile/experiences (إضافة خبرة جديدة)
+# 2. POST /profile/experiences
 # ==========================================
 @router.post("/experiences", response_model=ExperienceResponse, status_code=status.HTTP_201_CREATED)
 def create_experience(
@@ -339,7 +333,7 @@ def create_experience(
 
 
 # ==========================================
-# 3. PUT /profile/experiences/{exp_id} (تعديل خبرة)
+# 3. PUT /profile/experiences/{exp_id}
 # ==========================================
 @router.put("/experiences/{exp_id}", response_model=ExperienceResponse)
 def update_experience(
@@ -370,7 +364,7 @@ def update_experience(
 
 
 # ==========================================
-# 4. DELETE /profile/experiences/{exp_id} (حذف خبرة)
+# 4. DELETE /profile/experiences/{exp_id}
 # ==========================================
 @router.delete("/experiences/{exp_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_experience(
@@ -390,8 +384,9 @@ def delete_experience(
     db.commit()
     return None
 
+
 # ==========================================
-# 1. GET /profile/preferences (جلب التفضيلات)
+# 1. GET /profile/preferences
 # ==========================================
 @router.get("/preferences", response_model=PreferencesResponse)
 def get_preferences(
@@ -413,7 +408,7 @@ def get_preferences(
 
 
 # ==========================================
-# 2. PUT /profile/preferences (حفظ التفضيلات والضغط على "إنهاء")
+# 2. PUT /profile/preferences
 # ==========================================
 @router.put("/preferences", response_model=PreferencesResponse)
 def update_preferences(
@@ -427,13 +422,10 @@ def update_preferences(
         profile = Profile(user_id=current_user.id)
         db.add(profile)
 
-    # تحديث حقول التفضيلات
     profile.desired_degree_level = data.desired_degree_level
     profile.funding_type = data.funding_type
     profile.preferred_fields_of_study = data.preferred_fields_of_study
     profile.preferred_countries = data.preferred_countries
-    
-    # تعيين حالة الملف الشخصي كـ مكتمل بالكامل
     profile.is_completed = True
 
     db.commit()
@@ -448,6 +440,9 @@ def update_preferences(
     )
 
 
+# ==========================================
+# GET /profile (البروفايل الكامل)
+# ==========================================
 @router.get("", response_model=UserProfile)
 def get_user_profile(
     db: Session = Depends(get_db),
@@ -455,7 +450,6 @@ def get_user_profile(
 ):
     profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
 
-    # 1. بناء PersonalInfo
     personal_info = PersonalInfo(
         first_name=profile.first_name if profile else "",
         last_name=profile.last_name if profile else "",
@@ -475,7 +469,6 @@ def get_user_profile(
         )
     )
 
-    # 2. بناء AcademicInfo
     academic_info = AcademicInfo(
         field_of_study=profile.field_of_study if profile and profile.field_of_study else FieldOfStudy.OTHER,
         academic_level=profile.academic_level if profile and profile.academic_level else AcademicLevel.BACHELOR,
@@ -488,22 +481,18 @@ def get_user_profile(
         expected_graduation_year=profile.expected_graduation_year if profile and profile.expected_graduation_year else 2026
     )
 
-    # 3. بناء Documents
     documents_data = Documents.model_validate(profile.documents_data) if (profile and profile.documents_data) else Documents()
-    # 4. بناء SkillsAndLanguages
     languages_list = [LanguageItem(**lang) for lang in profile.languages_data] if (profile and profile.languages_data) else []
     skills_and_languages = SkillsAndLanguages(
-    languages=languages_list,
-    skills=profile.skills_data or []
+        languages=languages_list,
+        skills=profile.skills_data or []
     ) 
 
-    # 5. جلب قائمة الخبرات (Experiences)
     experiences_list = []
     if profile:
         experiences_db = db.query(Experience).filter(Experience.profile_id == profile.id).all()
         experiences_list = [ExperienceResponse.model_validate(exp) for exp in experiences_db]
 
-    # 6. بناء Preferences
     preferences_data = PreferencesResponse(
         desired_degree_level=profile.desired_degree_level if profile else None,
         funding_type=profile.funding_type if profile else None,
@@ -512,7 +501,6 @@ def get_user_profile(
         is_profile_completed=profile.is_completed if profile else False
     )
 
-    # 7. حساب نسبة الاكتمال
     completion_percentage = calculate_profile_completion(
         personal_info,
         academic_info,

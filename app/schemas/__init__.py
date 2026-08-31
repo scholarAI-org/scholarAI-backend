@@ -5,5 +5,17 @@ from app.schemas.profile import (
     Documents,
     SkillsAndLanguages,
     PreferencesResponse,
-    UserProfile
+    UserProfile,
+    ProfileCreate, 
+    ProfileUpdate, 
+    ProfileResponse, 
+    WorkExperienceCreate, 
+    WorkExperienceResponse, 
+    LanguageCreate, 
+    LanguageResponse,
+)
+from app.schemas.scholarship import (
+    ScholarshipCreate,
+    ScholarshipResponse,
+    ScholarshipExistsResponse,
 )
