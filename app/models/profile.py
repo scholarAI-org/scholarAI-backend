@@ -17,19 +17,30 @@ class FinancialStatus(str, enum.Enum):
     STABLE = "STABLE"
 
 
+class AcademicLevel(str, enum.Enum):
+    TAWJIHI = "TAWJIHI"  # إضافة التوجيهي / الثانوية العامة
+    BACHELOR = "BACHELOR"
+    MASTER = "MASTER"
+    PHD = "PHD"
+
+
 class FieldOfStudy(str, enum.Enum):
+    # فروع التوجيهي
+    SCIENTIFIC = "SCIENTIFIC"
+    LITERARY = "LITERARY"
+    SHARIA = "SHARIA"
+    INDUSTRIAL = "INDUSTRIAL"
+    ENTREPRENEURSHIP_BUSINESS = "ENTREPRENEURSHIP_BUSINESS"
+    AGRICULTURAL = "AGRICULTURAL"
+    HOME_ECONOMICS = "HOME_ECONOMICS"
+
+    # التخصصات الجامعية
     ENGINEERING = "ENGINEERING"
     COMPUTER_SCIENCE = "COMPUTER_SCIENCE"
     MEDICINE = "MEDICINE"
     BUSINESS = "BUSINESS"
     ARTS = "ARTS"
     OTHER = "OTHER"
-
-
-class AcademicLevel(str, enum.Enum):
-    BACHELOR = "BACHELOR"
-    MASTER = "MASTER"
-    PHD = "PHD"
 
 
 class GPAScale(str, enum.Enum):
@@ -78,7 +89,9 @@ class Profile(Base):
     financial_status = Column(Enum(FinancialStatus), nullable=True)
     id_number = Column(String(50), nullable=True)
     passport_number = Column(String(50), nullable=True)
-    field_of_study = Column(Enum(FieldOfStudy), nullable=True)
+
+    # تغيير FieldOfStudy إلى String(100) ليكون أكثر مرونة لجميع التخصصات والفروع
+    field_of_study = Column(String(100), nullable=True)
     academic_level = Column(Enum(AcademicLevel), nullable=True)
     gpa_value = Column(Float, nullable=True)
     gpa_scale = Column(Enum(GPAScale), nullable=True)
