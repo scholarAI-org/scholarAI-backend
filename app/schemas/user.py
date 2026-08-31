@@ -1,35 +1,56 @@
-from pydantic import BaseModel, EmailStr, field_validator , Field
+from pydantic import BaseModel, ConfigDict, EmailStr, field_validator, Field
 from typing import Optional
 import re
 
-# مخطط البيانات التي سيرسلها المستخدم عند التسجيل
+PASSWORD_DESCRIPTION = (
+    "At least 8 characters, one digit, and one special character "
+    "(!@#$%^&*(),.?\":{}|<>)"
+)
+
 
 class UserCreate(BaseModel):
-    full_name: str
-    email: EmailStr
-    password: str
-    role: Optional[str] = "student"  # اختياري والقيمة الافتراضية طالب
+    full_name: str = Field(
+        ...,
+        min_length=1,
+        description="Required. JSON key must be full_name (not fullName).",
+        examples=["Ahmed Ali"],
+    )
+    email: EmailStr = Field(..., examples=["user@example.com"])
+    password: str = Field(..., description=PASSWORD_DESCRIPTION, examples=["Pass123!"])
+    role: Optional[str] = Field(
+        default="student",
+        description="Optional. Defaults to student.",
+        examples=["student"],
+    )
 
-    # التحقق من شروط كلمة المرور
-    @field_validator('password')
+    @field_validator("password")
     @classmethod
     def validate_password(cls, v: str) -> str:
-        # 1. التحقق من الطول (8 أحرف على الأقل)
         if len(v) < 8:
-            raise ValueError('كلمة المرور يجب أن تكون 8 أحرف على الأقل')
-        
-        # 2. التحقق من وجود رقم واحد على الأقل
+            raise ValueError("كلمة المرور يجب أن تكون 8 أحرف على الأقل")
+
         if not re.search(r"\d", v):
-            raise ValueError('كلمة المرور يجب أن تحتوي على رقم واحد على الأقل')
-        
-        # 3. التحقق من وجود رمز خاص على الأقل (مثل @, #, $, %, إلخ)
+            raise ValueError("كلمة المرور يجب أن تحتوي على رقم واحد على الأقل")
+
         if not re.search(r"[!@#$%^&*(),.?\":{}|<>]", v):
-            raise ValueError('كلمة المرور يجب أن تحتوي على رمز خاص واحد على الأقل (!@#$%^&*)')
-        
+            raise ValueError(
+                "كلمة المرور يجب أن تحتوي على رمز خاص واحد على الأقل (!@#$%^&*)"
+            )
+
         return v
 
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "full_name": "Ahmed Ali",
+                "email": "user@example.com",
+                "password": "Pass123!",
+                "role": "student",
+            }
+        }
+    )
 
-# مخطط البيانات التي نرجعها للمستخدم كـ Response (بدون الباسورد!)
+
 class UserResponse(BaseModel):
     id: int
     full_name: str
@@ -37,28 +58,35 @@ class UserResponse(BaseModel):
     role: str
     is_active: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
-# مخطط بيانات تسجيل الدخول
 class UserLogin(BaseModel):
-    email: EmailStr
-    password: str
+    email: EmailStr = Field(..., examples=["user@example.com"])
+    password: str = Field(..., examples=["Pass123!"])
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "email": "user@example.com",
+                "password": "Pass123!",
+            }
+        }
+    )
 
 
-# مخطط الـ Token المرجعة بعد تسجيل الدخول
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
 
-# مخطط طلب إرسال رمز إعادة التعيين
+
 class ForgotPasswordRequest(BaseModel):
-    email: EmailStr
+    email: EmailStr = Field(..., examples=["user@example.com"])
+
 
 class ResetPasswordRequest(BaseModel):
-    token: str
-    new_password: str
+    token: str = Field(..., description="Reset token from the email link.")
+    new_password: str = Field(..., description=PASSWORD_DESCRIPTION, examples=["Pass123!"])
 
     @field_validator("new_password")
     @classmethod
@@ -67,9 +95,7 @@ class ResetPasswordRequest(BaseModel):
             raise ValueError("كلمة المرور يجب أن تكون 8 أحرف على الأقل")
 
         if not re.search(r"\d", v):
-            raise ValueError(
-                "كلمة المرور يجب أن تحتوي على رقم واحد على الأقل"
-            )
+            raise ValueError("كلمة المرور يجب أن تحتوي على رقم واحد على الأقل")
 
         if not re.search(r'[!@#$%^&*(),.?":{}|<>]', v):
             raise ValueError(
@@ -78,27 +104,32 @@ class ResetPasswordRequest(BaseModel):
 
         return v
 
-# مخطط إعادة تعيين كلمة المرور باستخدام الرمز
+
 class ChangePasswordRequest(BaseModel):
     old_password: str
     new_password: str = Field(
         ...,
         min_length=8,
-        description="كلمة المرور الجديدة يجب ألا تقل عن 8 خانات"
+        description=PASSWORD_DESCRIPTION,
+        examples=["Pass123!"],
     )
 
-    @field_validator('new_password')
+    @field_validator("new_password")
     @classmethod
     def validate_password(cls, v: str) -> str:
         if len(v) < 8:
-            raise ValueError('كلمة المرور يجب أن تكون 8 أحرف على الأقل')
+            raise ValueError("كلمة المرور يجب أن تكون 8 أحرف على الأقل")
 
         if not re.search(r"\d", v):
-            raise ValueError('كلمة المرور يجب أن تحتوي على رقم واحد على الأقل')
+            raise ValueError("كلمة المرور يجب أن تحتوي على رقم واحد على الأقل")
 
         if not re.search(r"[!@#$%^&*(),.?\":{}|<>]", v):
             raise ValueError(
-                'كلمة المرور يجب أن تحتوي على رمز خاص واحد على الأقل (!@#$%^&*)'
+                "كلمة المرور يجب أن تحتوي على رمز خاص واحد على الأقل (!@#$%^&*)"
             )
 
         return v
+
+
+class MessageResponse(BaseModel):
+    message: str

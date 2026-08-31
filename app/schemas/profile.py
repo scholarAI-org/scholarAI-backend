@@ -1,8 +1,15 @@
 from datetime import date, datetime
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Annotated, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    StringConstraints,
+    field_validator,
+)
 from pydantic.alias_generators import to_camel
 
 from app.models.profile import (
@@ -17,9 +24,16 @@ from app.models.profile import (
     PassportAvailability,
 )
 
+# نوع نصي يتأكد من أن النصوص المحشوة ليست فارغة
+RequiredText = Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
+
 
 class CamelModel(BaseModel):
-    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, from_attributes=True)
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+        from_attributes=True,
+    )
 
 
 class UploadStatus(str, Enum):
@@ -92,6 +106,17 @@ class LanguageItem(CamelModel):
     proficiency_level: LanguageProficiency
 
 
+class LanguageCreate(BaseModel):
+    language_name: str
+    proficiency_level: LanguageProficiency
+
+
+class LanguageResponse(LanguageCreate):
+    id: int
+    profile_id: int
+    model_config = ConfigDict(from_attributes=True)
+
+
 class SkillsAndLanguages(CamelModel):
     languages: List[LanguageItem] = Field(default_factory=list)
     skills: List[str] = Field(default_factory=list)
@@ -117,6 +142,156 @@ class ExperienceUpdate(ExperienceBase):
 
 class ExperienceResponse(ExperienceBase):
     id: int
+    profile_id: Optional[int] = None
+    model_config = ConfigDict(from_attributes=True)
+
+
+class WorkExperienceCreate(ExperienceBase):
+    pass
+
+
+class WorkExperienceResponse(ExperienceBase):
+    id: int
+    profile_id: int
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ProfileBase(BaseModel):
+    full_name: RequiredText
+    gender: RequiredText
+    marital_status: Optional[str] = None
+    date_of_birth: date
+    country_of_birth: Optional[str] = None
+    nationality: RequiredText
+    country_of_residence: RequiredText
+    id_type: Optional[str] = None
+    id_number: Optional[str] = None
+
+    father_name: Optional[str] = None
+    mother_name: Optional[str] = None
+    father_income: Optional[float] = 0.0
+    mother_income: Optional[float] = 0.0
+    num_of_siblings: Optional[int] = 0
+    currency: Optional[str] = "USD"
+
+    country: RequiredText
+    city: RequiredText
+    address: Optional[str] = None
+    phone_number: RequiredText
+
+    degree: RequiredText
+    major: RequiredText
+    institution_name: RequiredText
+    graduation_year: int
+    gpa: float
+    gpa_scale: str = "100"
+
+
+class ProfileCreate(ProfileBase):
+    experiences: List[WorkExperienceCreate] = Field(default_factory=list)
+    languages: List[LanguageCreate] = Field(default_factory=list)
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "full_name": "Ahmed Ali",
+                "gender": "male",
+                "date_of_birth": "2000-01-15",
+                "nationality": "Jordanian",
+                "country_of_residence": "Jordan",
+                "country": "Jordan",
+                "city": "Amman",
+                "phone_number": "+962790000000",
+                "degree": "Bachelor",
+                "major": "Computer Science",
+                "institution_name": "University of Jordan",
+                "graduation_year": 2024,
+                "gpa": 84.5,
+                "gpa_scale": "100",
+                "experiences": [],
+                "languages": [],
+            }
+        }
+    )
+
+    @field_validator(
+        "full_name",
+        "gender",
+        "nationality",
+        "country_of_residence",
+        "country",
+        "city",
+        "phone_number",
+        "degree",
+        "major",
+        "institution_name",
+    )
+    @classmethod
+    def reject_placeholder_values(cls, value: str) -> str:
+        forbidden = {"string", "select", "choose", "اختر", "غير محدد"}
+        if value.strip().casefold() in forbidden:
+            raise ValueError("يرجى إدخال قيمة حقيقية، وليس قيمة افتراضية")
+        return value
+
+
+class ProfileUpdate(BaseModel):
+    full_name: Optional[RequiredText] = None
+    gender: Optional[RequiredText] = None
+    marital_status: Optional[str] = None
+    date_of_birth: Optional[date] = None
+    country_of_birth: Optional[str] = None
+    nationality: Optional[RequiredText] = None
+    country_of_residence: Optional[RequiredText] = None
+    id_type: Optional[str] = None
+    id_number: Optional[str] = None
+
+    father_name: Optional[str] = None
+    mother_name: Optional[str] = None
+    father_income: Optional[float] = None
+    mother_income: Optional[float] = None
+    num_of_siblings: Optional[int] = None
+    currency: Optional[str] = None
+
+    country: Optional[RequiredText] = None
+    city: Optional[RequiredText] = None
+    address: Optional[str] = None
+    phone_number: Optional[RequiredText] = None
+
+    degree: Optional[RequiredText] = None
+    major: Optional[RequiredText] = None
+    institution_name: Optional[RequiredText] = None
+    graduation_year: Optional[int] = None
+    gpa: Optional[float] = None
+    gpa_scale: Optional[str] = None
+
+    @field_validator(
+        "full_name",
+        "gender",
+        "nationality",
+        "country_of_residence",
+        "country",
+        "city",
+        "phone_number",
+        "degree",
+        "major",
+        "institution_name",
+    )
+    @classmethod
+    def reject_placeholder_values(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        forbidden = {"string", "select", "choose", "اختر", "غير محدد"}
+        if value.strip().casefold() in forbidden:
+            raise ValueError("يرجى إدخال قيمة حقيقية، وليس قيمة افتراضية")
+        return value
+
+
+class ProfileResponse(ProfileBase):
+    id: int
+    user_id: int
+    experiences: List[WorkExperienceResponse] = Field(default_factory=list)
+    languages: List[LanguageResponse] = Field(default_factory=list)
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SkillsAndLanguagesSuggestions(CamelModel):

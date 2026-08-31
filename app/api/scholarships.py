@@ -10,8 +10,12 @@ from app.schemas import ScholarshipCreate, ScholarshipResponse, ScholarshipExist
 router = APIRouter(prefix="/api/scholarships", tags=["Scholarships"])
 
 
-# 1. Endpoint للتحقق من وجود المنحة (يمنع التكرار قبل الـ Scraping)
-@router.get("/exists", response_model=ScholarshipExistsResponse)
+@router.get(
+    "/exists",
+    response_model=ScholarshipExistsResponse,
+    summary="Check if a scholarship already exists",
+    description="Used by scrapers to skip duplicates before ingesting a listing.",
+)
 def check_scholarship_exists(
     source: str = Query(..., description="مصدر المنحة مثل 'for9a' أو 'ministry'"),
     source_id: str = Query(..., description="المعرف الفريد للمنحة من الموقع الأصلي"),
@@ -28,8 +32,16 @@ def check_scholarship_exists(
     return {"exists": False, "scholarship_id": None}
 
 
-# 2. Endpoint لإنشاء منحة جديدة
-@router.post("/", response_model=ScholarshipResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/",
+    response_model=ScholarshipResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a scholarship listing",
+    responses={
+        400: {"description": "Integrity / duplicate constraint error"},
+        409: {"description": "Scholarship already exists for this source and source_id"},
+    },
+)
 def create_scholarship(
     scholarship_data: ScholarshipCreate,
     db: Session = Depends(get_db)

@@ -3,9 +3,9 @@ from typing import Optional
 
 class Settings(BaseSettings):
     # إعدادات قاعدة البيانات والتطبيق
-    PROJECT_NAME: str = "Scholar AI"
-    DATABASE_URL: str = "sqlite:///./scholar_ai.db"  # قيمة افتراضية تمنع الأيرور
-    SECRET_KEY: str
+PROJECT_NAME: str = "Scholar AI"
+    DATABASE_URL: str = "sqlite:///./scholar_ai.db"
+    SECRET_KEY: str = "scholar_ai_super_secret_key_change_me_later"
     ALGORITHM: str = "HS256"
     
     # إعدادات الواجهة الأمامية
