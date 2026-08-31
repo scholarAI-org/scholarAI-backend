@@ -17,7 +17,11 @@ from app.core.security import (
     create_reset_token, verify_reset_token, get_current_user
 )
 from app.core.config import settings
-from app.core.mailer import send_reset_password_email, send_verification_otp_email
+from app.core.mailer import (
+    EmailDeliveryError,
+    send_reset_password_email,
+    send_verification_otp_email,
+)
 from app.services.email_verification import (
     clear_verification_otp,
     issue_verification_otp,
@@ -27,6 +31,88 @@ from app.services.email_verification import (
 
 router = APIRouter(prefix='/auth', tags=['Authentication'])
 logger = logging.getLogger("uvicorn.error")
+
+
+def _otp_retry_after(user: User, now) -> int | None:
+    if not user.email_verification_otp_sent_at:
+        return None
+    cooldown = timedelta(
+        seconds=settings.EMAIL_VERIFICATION_OTP_RESEND_COOLDOWN_SECONDS
+    )
+    elapsed = now - user.email_verification_otp_sent_at
+    if elapsed >= cooldown:
+        return None
+    return max(1, int((cooldown - elapsed).total_seconds()))
+
+
+def _raise_if_otp_cooldown_active(user: User, now) -> None:
+    retry_after = _otp_retry_after(user, now)
+    if retry_after is not None:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Please wait before requesting another verification OTP",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+
+def _clear_failed_otp(user: User, db: Session) -> None:
+    clear_verification_otp(user)
+    try:
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        logger.error(
+            "Could not clear failed verification OTP for user_id=%s",
+            user.id,
+        )
+
+
+def _issue_and_send_verification_otp(
+    user: User,
+    db: Session,
+    *,
+    database_error_detail: str,
+    delivery_error_detail: str,
+) -> None:
+    otp = issue_verification_otp(user)
+    try:
+        db.commit()
+        db.refresh(user)
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=database_error_detail,
+        )
+
+    try:
+        send_verification_otp_email(user.email, otp)
+    except EmailDeliveryError as exc:
+        logger.error(
+            "Verification email failed user_id=%s provider=resend status=%s type=%s message=%s",
+            user.id,
+            exc.status_code or "unavailable",
+            exc.error_type or "unavailable",
+            str(exc),
+        )
+        _clear_failed_otp(user, db)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=delivery_error_detail,
+        )
+    except Exception as exc:
+        # Unexpected adapters and test doubles may bypass the safe mail wrapper.
+        # Log only the exception type so message bodies and OTPs cannot leak.
+        logger.error(
+            "Verification email failed user_id=%s error_type=%s",
+            user.id,
+            type(exc).__name__,
+        )
+        _clear_failed_otp(user, db)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=delivery_error_detail,
+        )
 
 @router.post(
     '/register',
@@ -39,18 +125,39 @@ logger = logging.getLogger("uvicorn.error")
         'Do not send `fullName` or form-data; missing `full_name` returns 422 Field required.'
     ),
     responses={
-        400: {"description": "Email already registered"},
+        400: {"description": "Verified email already registered"},
+        429: {"description": "A verification OTP was sent too recently"},
         503: {"description": "Database or email delivery unavailable"},
         422: {"description": "Validation error (missing or invalid fields)"},
     },
 )
 def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
-    existing_user = db.query(User).filter(User.email == user_data.email).first()
+    existing_user = (
+        db.query(User)
+        .filter(User.email == user_data.email)
+        .with_for_update()
+        .first()
+    )
     if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="البريد الإلكتروني مسجل بالفعل"
+        if existing_user.is_email_verified:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already registered",
+            )
+
+        _raise_if_otp_cooldown_active(existing_user, utc_now_naive())
+        _issue_and_send_verification_otp(
+            existing_user,
+            db,
+            database_error_detail="Could not update the pending registration",
+            delivery_error_detail=(
+                "The account is still pending, but the verification email could not "
+                "be sent. Please try again."
+            ),
         )
+        return {
+            "message": "Registration successful. Verification OTP sent to your email."
+        }
 
     hashed_pwd = hash_password(user_data.password)
 
@@ -62,12 +169,9 @@ def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
         role=user_data.role if user_data.role else "student",
         is_email_verified=False,
     )
-    otp = issue_verification_otp(new_user)
-
     try:
         db.add(new_user)
-        db.commit()
-        db.refresh(new_user)
+        db.flush()
     except IntegrityError:
         db.rollback()
         raise HTTPException(
@@ -81,17 +185,15 @@ def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
             detail="تعذر إنشاء الحساب بسبب خطأ في قاعدة البيانات",
         )
 
-    try:
-        send_verification_otp_email(new_user.email, otp)
-    except Exception:
-        # Do not log the provider exception; it may echo the email body and OTP.
-        logger.error("Failed to send verification email to user id %s", new_user.id)
-        clear_verification_otp(new_user)
-        db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Account created, but the verification email could not be sent. Please resend it.",
-        )
+    _issue_and_send_verification_otp(
+        new_user,
+        db,
+        database_error_detail="Could not create the account due to a database error",
+        delivery_error_detail=(
+            "Account created, but the verification email could not be sent. "
+            "Please resend it."
+        ),
+    )
 
     return {
         "message": "Registration successful. Verification OTP sent to your email."
@@ -162,7 +264,10 @@ def verify_email(request: VerifyEmailRequest, db: Session = Depends(get_db)):
         )
 
     if user.is_email_verified:
-        return {"message": "Email verified successfully"}
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired OTP",
+        )
 
     now = utc_now_naive()
     if (
@@ -217,38 +322,15 @@ def resend_verification_otp(
     if user.is_email_verified:
         return {"message": "Email is already verified"}
 
-    now = utc_now_naive()
-    cooldown = timedelta(
-        seconds=settings.EMAIL_VERIFICATION_OTP_RESEND_COOLDOWN_SECONDS
+    _raise_if_otp_cooldown_active(user, utc_now_naive())
+    _issue_and_send_verification_otp(
+        user,
+        db,
+        database_error_detail="Could not update the verification OTP",
+        delivery_error_detail=(
+            "The verification email could not be sent. Please try again."
+        ),
     )
-    if (
-        user.email_verification_otp_sent_at
-        and now - user.email_verification_otp_sent_at < cooldown
-    ):
-        retry_after = max(
-            1,
-            int((cooldown - (now - user.email_verification_otp_sent_at)).total_seconds()),
-        )
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Please wait before requesting another verification OTP",
-            headers={"Retry-After": str(retry_after)},
-        )
-
-    otp = issue_verification_otp(user, now=now)
-    db.commit()
-
-    try:
-        send_verification_otp_email(user.email, otp)
-    except Exception:
-        # Do not log the provider exception; it may echo the email body and OTP.
-        logger.error("Failed to resend verification email to user id %s", user.id)
-        clear_verification_otp(user)
-        db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="The verification email could not be sent. Please try again.",
-        )
 
     return {"message": "Verification OTP sent to your email"}
 

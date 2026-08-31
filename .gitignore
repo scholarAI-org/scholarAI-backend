@@ -7,3 +7,6 @@ venv/
 *.pyc
 *.pyo
 *$py.class
+.neon
+.agents/
+skills-lock.json

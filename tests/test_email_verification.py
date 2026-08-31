@@ -1,6 +1,7 @@
 import os
 import importlib.util
 import unittest
+from unittest.mock import patch
 from datetime import UTC, datetime, timedelta
 
 os.environ["DATABASE_URL"] = "sqlite://"
@@ -13,7 +14,10 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.api import auth as auth_api
+from app.core import mailer
+from app.core.config import settings
 from app.core.database import get_db
+from app.core.mailer import EmailDeliveryError
 from app.core.security import create_reset_token
 from app.main import app
 from app.models.profile import LanguageDetail, Profile, WorkExperience
@@ -144,7 +148,7 @@ class EmailVerificationFlowTests(unittest.TestCase):
             "/auth/verify-email",
             json={"email": "user@example.com", "otp": otp},
         )
-        self.assertEqual(reused.status_code, 200)
+        self.assertEqual(reused.status_code, 400)
         self.assertIsNone(self.get_user().email_verification_otp_hash)
 
         login = self.client.post(
@@ -228,7 +232,7 @@ class EmailVerificationFlowTests(unittest.TestCase):
         self.assertEqual(already_verified.json(), {"message": "Email is already verified"})
         self.assertEqual(len(self.mailbox), sent_count)
 
-    def test_invalid_input_unknown_email_and_duplicate_registration(self):
+    def test_invalid_input_unknown_email_and_registration_cooldown(self):
         invalid_email = self.client.post(
             "/auth/verify-email",
             json={"email": "not-an-email", "otp": "123456"},
@@ -246,13 +250,55 @@ class EmailVerificationFlowTests(unittest.TestCase):
         self.assertEqual(unknown.status_code, 400)
 
         self.assertEqual(self.register().status_code, 201)
-        self.assertEqual(self.register().status_code, 400)
+        repeated = self.register()
+        self.assertEqual(repeated.status_code, 429)
+        self.assertIn("retry-after", repeated.headers)
 
         unknown_resend = self.client.post(
             "/auth/resend-verification-otp",
             json={"email": "missing@example.com"},
         )
         self.assertEqual(unknown_resend.status_code, 200)
+
+    def test_reregister_unverified_user_resends_without_duplicate(self):
+        self.assertEqual(self.register().status_code, 201)
+        old_otp = self.mailbox[-1][1]
+
+        with self.Session() as db:
+            user = db.query(User).filter(User.email == "user@example.com").one()
+            user.email_verification_otp_sent_at = self.utc_now_naive() - timedelta(seconds=61)
+            db.commit()
+
+        repeated = self.register()
+        self.assertEqual(repeated.status_code, 201)
+        self.assertEqual(len(self.mailbox), 2)
+        new_otp = self.mailbox[-1][1]
+        self.assertNotEqual(old_otp, new_otp)
+
+        with self.Session() as db:
+            count = db.query(User).filter(User.email == "user@example.com").count()
+        self.assertEqual(count, 1)
+
+        old_result = self.client.post(
+            "/auth/verify-email",
+            json={"email": "user@example.com", "otp": old_otp},
+        )
+        self.assertEqual(old_result.status_code, 400)
+        new_result = self.client.post(
+            "/auth/verify-email",
+            json={"email": "user@example.com", "otp": new_otp},
+        )
+        self.assertEqual(new_result.status_code, 200)
+
+    def test_verified_email_cannot_register_again(self):
+        self.register_and_verify()
+        sent_count = len(self.mailbox)
+
+        repeated = self.register()
+
+        self.assertEqual(repeated.status_code, 400)
+        self.assertEqual(repeated.json()["detail"], "Email already registered")
+        self.assertEqual(len(self.mailbox), sent_count)
 
     def test_password_reset_change_password_jwt_and_profile_still_work(self):
         token = self.register_and_verify()
@@ -375,6 +421,61 @@ class EmailVerificationFlowTests(unittest.TestCase):
             self.assertFalse(new_verified)
 
         engine.dispose()
+
+
+class MailerSafetyTests(unittest.TestCase):
+    def setUp(self):
+        self.original_api_key = settings.RESEND_API_KEY
+        self.original_sender = settings.RESEND_FROM_EMAIL
+        self.original_legacy_sender = settings.MAIL_FROM
+        self.original_sender_name = settings.MAIL_FROM_NAME
+        settings.RESEND_API_KEY = "re_test_key"
+        settings.RESEND_FROM_EMAIL = "auth@scholarai.example"
+        settings.MAIL_FROM = "legacy@scholarai.example"
+        settings.MAIL_FROM_NAME = "Scholar AI"
+
+    def tearDown(self):
+        settings.RESEND_API_KEY = self.original_api_key
+        settings.RESEND_FROM_EMAIL = self.original_sender
+        settings.MAIL_FROM = self.original_legacy_sender
+        settings.MAIL_FROM_NAME = self.original_sender_name
+
+    def test_resend_from_email_is_used_for_otp_and_reset_mail(self):
+        with patch.object(
+            mailer.resend.Emails,
+            "send",
+            return_value={"id": "email_test"},
+        ) as send:
+            mailer.send_verification_otp_email("recipient@example.net", "123456")
+            otp_payload = send.call_args.args[0]
+            mailer.send_reset_password_email("recipient@example.net", "reset-token")
+            reset_payload = send.call_args.args[0]
+
+        self.assertEqual(
+            otp_payload["from"],
+            "Scholar AI <auth@scholarai.example>",
+        )
+        self.assertEqual(reset_payload["from"], otp_payload["from"])
+
+    def test_provider_error_is_redacted_and_preserves_diagnostics(self):
+        settings.RESEND_API_KEY = "re_secret_do_not_log"
+        provider_error = mailer.ResendError(
+            403,
+            "validation_error",
+            "Could not deliver to person@example.net with re_secret_do_not_log",
+            "Verify the sender domain",
+        )
+
+        with patch.object(mailer.resend.Emails, "send", side_effect=provider_error):
+            with self.assertRaises(EmailDeliveryError) as raised:
+                mailer.send_verification_otp_email("person@example.net", "123456")
+
+        error = raised.exception
+        self.assertEqual(error.status_code, 403)
+        self.assertEqual(error.error_type, "validation_error")
+        self.assertNotIn("re_secret_do_not_log", str(error))
+        self.assertNotIn("person@example.net", str(error))
+        self.assertIn("[redacted-email]", str(error))
 
 
 if __name__ == "__main__":
