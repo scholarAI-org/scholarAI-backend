@@ -4,7 +4,8 @@ from typing import Optional
 class Settings(BaseSettings):
     # إعدادات قاعدة البيانات والتطبيق
     PROJECT_NAME: str = "Scholar AI"
-    DATABASE_URL: str = "postgresql://postgres:123456@localhost:5432/scholarai_db"
+    DATABASE_URL: str = "sqlite:///./scholar_ai.db"  # قيمة افتراضية تمنع الأيرور
+    SECRET_KEY: str
     ALGORITHM: str = "HS256"
     
     # إعدادات الواجهة الأمامية
@@ -19,7 +20,6 @@ class Settings(BaseSettings):
     MAIL_FROM_NAME: Optional[str] = "Scholar AI Support"
 
     RESEND_API_KEY: Optional[str] = None
-    
     class Config:
         env_file = ".env"
         extra = "ignore"

@@ -2,32 +2,30 @@ import os
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
-from app.core.config import settings
 
 load_dotenv()
 
-# قراءة رابط قاعدة البيانات من متغيرات البيئة مع اعتماد الإعدادات كـ fallback
-DATABASE_URL = os.getenv("DATABASE_URL", settings.DATABASE_URL)
+# 1. قراءة رابط قاعدة البيانات من متغيرات البيئة (الخاصة بـ Render)
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-DATABASE_URL = settings.DATABASE_URL
-
-if DATABASE_URL.startswith("postgres://"):
+# 2. إذا كان الرابط يبدأ بـ postgres:// (تنسيق قديم)، نعدله إلى postgresql://
+if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
+# 3. إذا لم يجد رابط سحابي (يعني أنكِ تعملين محلياً على جهازك)، استخدم الرابط المحلي
 if not DATABASE_URL:
-    DATABASE_URL = settings.DATABASE_URL
+    raise RuntimeError("DATABASE_URL must be set in the environment or .env file.")
 
-engine_kwargs = {"pool_pre_ping": True}
-if DATABASE_URL.startswith("sqlite"):
-    engine_kwargs["connect_args"] = {"check_same_thread": False}
+# إنشاء محرك الاتصال (Engine)
+engine = create_engine(DATABASE_URL)
 
-engine = create_engine(DATABASE_URL, **engine_kwargs)
-
+# إنشاء الجلسة (Session)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+# الـ Base الخاص بالنودلز/النماذج
 Base = declarative_base()
 
-
+# دالة مخصصة لإعطاء جلسة اتصال لكل طلب (Dependency)
 def get_db():
     db = SessionLocal()
     try:
