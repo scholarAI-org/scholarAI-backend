@@ -1,81 +1,25 @@
 from datetime import date, datetime
 from enum import Enum
 from typing import Dict, List, Optional
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    EmailStr,
-    Field,
-    field_validator,
-    model_validator,
+
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic.alias_generators import to_camel
+
+from app.models.profile import (
+    AcademicLevel,
+    DesiredDegreeLevel,
+    ExperienceType,
+    FieldOfStudy,
+    FinancialStatus,
+    FundingType,
+    Gender,
+    GPAScale,
+    PassportAvailability,
 )
 
 
-# ==========================================
-# 1. Enums
-# ==========================================
-class Gender(str, Enum):
-    MALE = "MALE"
-    FEMALE = "FEMALE"
-
-
-class FinancialStatus(str, Enum):
-    LIMITED = "LIMITED"
-    MODERATE = "MODERATE"
-    STABLE = "STABLE"
-
-
-class AcademicLevel(str, Enum):
-    TAWJIHI = "TAWJIHI"
-    BACHELOR = "BACHELOR"
-    MASTER = "MASTER"
-    PHD = "PHD"
-
-
-class FieldOfStudy(str, Enum):
-    SCIENTIFIC = "SCIENTIFIC"
-    LITERARY = "LITERARY"
-    SHARIA = "SHARIA"
-    INDUSTRIAL = "INDUSTRIAL"
-    ENTREPRENEURSHIP_BUSINESS = "ENTREPRENEURSHIP_BUSINESS"
-    AGRICULTURAL = "AGRICULTURAL"
-    HOME_ECONOMICS = "HOME_ECONOMICS"
-
-    ENGINEERING = "ENGINEERING"
-    COMPUTER_SCIENCE = "COMPUTER_SCIENCE"
-    MEDICINE = "MEDICINE"
-    BUSINESS = "BUSINESS"
-    ARTS = "ARTS"
-    OTHER = "OTHER"
-
-
-class GPAScale(str, Enum):
-    SCALE_4 = "SCALE_4"
-    SCALE_5 = "SCALE_5"
-    SCALE_10 = "SCALE_10"
-    SCALE_100 = "SCALE_100"
-
-
-class DesiredDegreeLevel(str, Enum):
-    BACHELOR = "BACHELOR"
-    MASTER = "MASTER"
-    PHD = "PHD"
-    DIPLOMA = "DIPLOMA"
-    OTHER = "OTHER"
-
-
-class FundingType(str, Enum):
-    FULL = "FULL"
-    PARTIAL = "PARTIAL"
-    SELF = "SELF"
-    ANY = "ANY"
-
-
-class ExperienceType(str, Enum):
-    WORK = "WORK"
-    VOLUNTEER = "VOLUNTEER"
-    RESEARCH = "RESEARCH"
-    STUDENT_ACTIVITY = "STUDENT_ACTIVITY"
+class CamelModel(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, from_attributes=True)
 
 
 class UploadStatus(str, Enum):
@@ -86,109 +30,42 @@ class UploadStatus(str, Enum):
 
 
 class LanguageProficiency(str, Enum):
-    BEGINNER = "BEGINNER"
-    INTERMEDIATE = "INTERMEDIATE"
-    ADVANCED = "ADVANCED"
     NATIVE = "NATIVE"
+    ADVANCED_C1_C2 = "ADVANCED"
+    INTERMEDIATE_B1_B2 = "INTERMEDIATE"
+    BEGINNER_A1_A2 = "BEGINNER"
 
 
-# ==========================================
-# 2. Sub-Schemas with Strict Validation Rules
-# ==========================================
-class PersonalInfo(BaseModel):
-    # إجباري
-    first_name: str = Field(..., min_length=2, max_length=50)
-    last_name: str = Field(..., min_length=2, max_length=50)
-    email: EmailStr
-    birth_date: date
-    gender: Gender
-    nationality: str = Field(..., min_length=2, max_length=2, description="ISO 2-letter country code, e.g. PS")
-    country_of_residence: str = Field(..., min_length=2, max_length=2, description="ISO 2-letter country code")
-
-    # اختياري مفروض عليه Validation في حال وجوده
-    phone_number: Optional[str] = Field(None, pattern=r"^\+?[1-9]\d{7,14}$")
-    city: Optional[str] = Field(None, max_length=100)
-    financial_status: Optional[FinancialStatus] = None
-    id_number: Optional[str] = Field(None, pattern=r"^\d{9}$", description="Must be exactly 9 digits")
-    passport_number: Optional[str] = Field(None, pattern=r"^[A-Z0-9]{6,12}$")
-
-    @field_validator("birth_date")
-    @classmethod
-    def validate_age(cls, value: date) -> date:
-        today = date.today()
-        age = today.year - value.year - ((today.month, today.day) < (value.month, value.day))
-        if age < 15 or age > 80:
-            raise ValueError("العمر يجب أن يكون بين 15 و 80 سنة للتقديم على المنح")
-        return value
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class PersonalInfoUpdate(BaseModel):
-    first_name: Optional[str] = Field(None, min_length=2, max_length=50)
-    last_name: Optional[str] = Field(None, min_length=2, max_length=50)
-    email: Optional[EmailStr] = None
-    birth_date: Optional[date] = None
-    gender: Optional[Gender] = None
-    nationality: Optional[str] = Field(None, min_length=2, max_length=2)
-    country_of_residence: Optional[str] = Field(None, min_length=2, max_length=2)
-    phone_number: Optional[str] = Field(None, pattern=r"^\+?[1-9]\d{7,14}$")
-    city: Optional[str] = Field(None, max_length=100)
-    financial_status: Optional[FinancialStatus] = None
-    id_number: Optional[str] = Field(None, pattern=r"^\d{9}$")
-    passport_number: Optional[str] = Field(None, pattern=r"^[A-Z0-9]{6,12}$")
-
-    @field_validator("birth_date")
-    @classmethod
-    def validate_age(cls, value: Optional[date]) -> Optional[date]:
-        if value is not None:
-            today = date.today()
-            age = today.year - value.year - ((today.month, today.day) < (value.month, value.day))
-            if age < 15 or age > 80:
-                raise ValueError("العمر يجب أن يكون بين 15 و 80 سنة للتقديم على المنح")
-        return value
-
-
-class GPA(BaseModel):
-    value: float = Field(..., ge=0.0)
+class GPA(CamelModel):
+    value: float
     scale: GPAScale
 
-    @model_validator(mode="after")
-    def validate_gpa_limits(self) -> "GPA":
-        limits = {
-            GPAScale.SCALE_4: 4.0,
-            GPAScale.SCALE_5: 5.0,
-            GPAScale.SCALE_10: 10.0,
-            GPAScale.SCALE_100: 100.0,
-        }
-        max_limit = limits.get(self.scale)
-        if max_limit and self.value > max_limit:
-            raise ValueError(f"قيمة المعدل {self.value} تتجاوز الحد الأقصى للسلم المختار ({max_limit})")
-        return self
+
+class PersonalInfo(CamelModel):
+    first_name: str
+    last_name: str
+    email: EmailStr
+    phone_number: str
+    gender: Gender
+    birth_date: date
+    nationality: str
+    country_of_residence: str
+    city: Optional[str] = None
+    financial_status: Optional[FinancialStatus] = None
+    id_number: str
+    passport_status: PassportAvailability = PassportAvailability.NOT_AVAILABLE
 
 
-class AcademicInfo(BaseModel):
-    academic_level: AcademicLevel
+class AcademicInfo(CamelModel):
     field_of_study: FieldOfStudy
-    institution: str = Field(..., min_length=2, max_length=255)
+    academic_level: AcademicLevel
     gpa: GPA
-
-    current_study_language: List[str] = []
-    expected_graduation_year: Optional[int] = Field(None, ge=1990, le=2035)
-
-    model_config = ConfigDict(from_attributes=True)
+    institution: str
+    current_study_language: List[str]
+    expected_graduation_year: int
 
 
-class AcademicInfoUpdate(BaseModel):
-    academic_level: Optional[AcademicLevel] = None
-    field_of_study: Optional[FieldOfStudy] = None
-    institution: Optional[str] = Field(None, min_length=2, max_length=255)
-    gpa: Optional[GPA] = None
-    current_study_language: Optional[List[str]] = None
-    expected_graduation_year: Optional[int] = Field(None, ge=1990, le=2035)
-
-
-class UploadedFile(BaseModel):
+class UploadedFile(CamelModel):
     status: UploadStatus = UploadStatus.NOT_UPLOADED
     file_url: Optional[str] = None
     file_name: Optional[str] = None
@@ -197,168 +74,110 @@ class UploadedFile(BaseModel):
     uploaded_at: Optional[datetime] = None
 
 
-class Documents(BaseModel):
+class RecommendationLetter(UploadedFile):
+    id: str
+
+
+class Documents(CamelModel):
     cv: UploadedFile = Field(default_factory=UploadedFile)
-    transcript: UploadedFile = Field(default_factory=UploadedFile)
-    graduation_certificate: UploadedFile = Field(default_factory=UploadedFile)
-    passport: UploadedFile = Field(default_factory=UploadedFile)
-    recommendation_letters: List[UploadedFile] = Field(default_factory=list)
-    english_test: UploadedFile = Field(default_factory=UploadedFile)
-
-    model_config = ConfigDict(from_attributes=True)
+    motivation_letter: UploadedFile = Field(default_factory=UploadedFile)
+    bachelor_certificate: UploadedFile = Field(default_factory=UploadedFile)
+    official_transcript: UploadedFile = Field(default_factory=UploadedFile)
+    language_certificate: UploadedFile = Field(default_factory=UploadedFile)
+    recommendation_letters: List[RecommendationLetter] = Field(default_factory=list)
 
 
-class LanguageItem(BaseModel):
-    name: str = Field(..., min_length=2, max_length=50)
-    proficiency: LanguageProficiency
+class LanguageItem(CamelModel):
+    language_name: str
+    proficiency_level: LanguageProficiency
 
 
-class SkillsAndLanguages(BaseModel):
-    languages: List[LanguageItem] = []
-    skills: List[str] = []
+class SkillsAndLanguages(CamelModel):
+    languages: List[LanguageItem] = Field(default_factory=list)
+    skills: List[str] = Field(default_factory=list)
 
 
-class SkillsAndLanguagesSuggestions(BaseModel):
-    popular_languages: List[str]
-    suggested_skills_by_category: Dict[str, List[str]]
-
-
-# ==========================================
-# 3. Experience Schemas
-# ==========================================
-class Experience(BaseModel):
+class ExperienceBase(CamelModel):
     experience_type: ExperienceType
-    title: str = Field(..., min_length=2, max_length=250)
-    organization: str = Field(..., min_length=2, max_length=250)
+    title: str
+    organization: str
     start_date: date
     end_date: Optional[date] = None
     is_current: bool = False
     description: Optional[str] = None
 
-    @model_validator(mode="after")
-    def validate_dates(self) -> "Experience":
-        if not self.is_current and self.end_date is not None:
-            if self.end_date < self.start_date:
-                raise ValueError("تاريخ النهاية يجب أن يكون بعد تاريخ البداية")
-        return self
 
-
-class ExperienceCreate(Experience):
+class ExperienceCreate(ExperienceBase):
     pass
 
 
-class ExperienceUpdate(BaseModel):
-    experience_type: Optional[ExperienceType] = None
-    title: Optional[str] = Field(None, min_length=2, max_length=250)
-    organization: Optional[str] = Field(None, min_length=2, max_length=250)
-    start_date: Optional[date] = None
-    end_date: Optional[date] = None
-    is_current: Optional[bool] = None
-    description: Optional[str] = None
+class ExperienceUpdate(ExperienceBase):
+    pass
 
 
-class ExperienceResponse(Experience):
+class ExperienceResponse(ExperienceBase):
     id: int
 
-    model_config = ConfigDict(from_attributes=True)
+
+class SkillsAndLanguagesSuggestions(CamelModel):
+    popular_languages: List[str]
+    suggested_skills_by_category: Dict[str, List[str]]
 
 
-# ==========================================
-# 4. Preferences Schemas
-# ==========================================
-class Preferences(BaseModel):
-    desired_degree_level: DesiredDegreeLevel
-    funding_type: FundingType
-
-    preferred_fields_of_study: List[str] = []
-    preferred_countries: List[str] = []
-
-
-class PreferencesUpdate(BaseModel):
+class PreferencesBase(CamelModel):
     desired_degree_level: Optional[DesiredDegreeLevel] = None
     funding_type: Optional[FundingType] = None
-    preferred_fields_of_study: Optional[List[str]] = None
-    preferred_countries: Optional[List[str]] = None
+    preferred_fields_of_study: List[str] = Field(default_factory=list)
+    preferred_countries: List[str] = Field(default_factory=list)
 
 
-class PreferencesResponse(Preferences):
-    is_completed: bool = False
-
-    model_config = ConfigDict(from_attributes=True)
+class PreferencesUpdate(PreferencesBase):
+    pass
 
 
-# ==========================================
-# 5. Full Profile Schemas & Completion Logic
-# ==========================================
-class ProfileUpdate(BaseModel):
-    personal_info: Optional[PersonalInfoUpdate] = None
-    academic_info: Optional[AcademicInfoUpdate] = None
-    documents: Optional[Documents] = None
-    skills_and_languages: Optional[SkillsAndLanguages] = None
-    preferences: Optional[PreferencesUpdate] = None
+class PreferencesResponse(PreferencesBase):
+    is_profile_completed: bool = False
 
 
-class UserProfile(BaseModel):
-    id: int
-    user_id: int
+class UserProfile(CamelModel):
     personal_info: PersonalInfo
     academic_info: AcademicInfo
     documents: Documents
     skills_and_languages: SkillsAndLanguages
-    experiences: List[ExperienceResponse] = []
+    experiences: List[ExperienceResponse] = Field(default_factory=list)
     preferences: PreferencesResponse
-    profile_completion_percentage: float = 0.0
-
-    model_config = ConfigDict(from_attributes=True)
+    profile_completion_percentage: int
 
 
 def calculate_profile_completion(
-    personal_info: PersonalInfo,
-    academic_info: AcademicInfo,
+    personal: PersonalInfo,
+    academic: AcademicInfo,
     documents: Documents,
-    skills_and_languages: SkillsAndLanguages,
+    skills_lang: SkillsAndLanguages,
     experiences: List[ExperienceResponse],
     preferences: PreferencesResponse,
-) -> float:
-    """
-    حساب نسبة اكتمال الملف الشخصي بناءً على الحقول الإلزامية فقط.
-     الأقسام الإلزامية الأساسية:
-    1. المعلومات الشخصية الإلزامية (الاسم، الإيميل، تاريخ الميلاد، الجنس، الجنسية، بلد الإقامة).
-    2. المعلومات الأكاديمية (المستوى، التخصص، الجامعة/المؤسسة، المعدل).
-    3. التفضيلات الإلزامية (المستوى المرغوب، نوع التمويل).
-    """
-    total_sections = 3
-    completed_sections = 0
+) -> int:
+    score = 0
 
-    # 1. المعلومات الشخصية (الحقول الإلزامية فقط - بدون جواز السفر أو الهاتف أو المدينة)
-    is_personal_complete = all([
-        personal_info.first_name,
-        personal_info.last_name,
-        personal_info.email,
-        personal_info.birth_date,
-        personal_info.gender,
-        personal_info.nationality,
-        personal_info.country_of_residence
-    ])
-    if is_personal_complete:
-        completed_sections += 1
+    if personal.first_name and personal.last_name and personal.phone_number and personal.nationality:
+        score += 20
+    if academic.institution and academic.gpa.value > 0:
+        score += 20
 
-    # 2. البيانات الأكاديمية الإلزامية
-    is_academic_complete = all([
-        academic_info.academic_level,
-        academic_info.field_of_study,
-        academic_info.institution,
-        academic_info.gpa and academic_info.gpa.value is not None
-    ])
-    if is_academic_complete:
-        completed_sections += 1
+    uploaded_documents = (
+        documents.cv,
+        documents.motivation_letter,
+        documents.bachelor_certificate,
+        documents.official_transcript,
+        documents.language_certificate,
+    )
+    if any(document.status == UploadStatus.UPLOADED for document in uploaded_documents) or documents.recommendation_letters:
+        score += 20
+    if skills_lang.languages or skills_lang.skills:
+        score += 15
+    if experiences:
+        score += 15
+    if preferences.desired_degree_level and preferences.funding_type:
+        score += 10
 
-    # 3. التفضيلات الإلزامية
-    is_preferences_complete = all([
-        preferences.desired_degree_level,
-        preferences.funding_type
-    ])
-    if is_preferences_complete:
-        completed_sections += 1
-
-    return round((completed_sections / total_sections) * 100, 2)
+    return score
