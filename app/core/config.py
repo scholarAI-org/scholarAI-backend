@@ -3,8 +3,8 @@ from typing import Optional
 
 class Settings(BaseSettings):
     # إعدادات قاعدة البيانات والتطبيق
-    PROJECT_NAME: str = "Scholar AI"
-    DATABASE_URL: str = "sqlite:///./scholar_ai.db"  # قيمة افتراضية تمنع الأيرور
+    PROJECT_NAME: str = "ascv"
+    DATABASE_URL: str = "postgresql://postgres:123456@localhost:5432/scholarai_db"
     SECRET_KEY: str = "scholar_ai_super_secret_key_change_me_later"
     ALGORITHM: str = "HS256"
     

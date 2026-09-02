@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from typing import Annotated, Optional, List
 from datetime import date
 from pydantic import field_validator
@@ -24,8 +24,7 @@ class LanguageResponse(LanguageBase):
     id: int
     profile_id: int
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ==========================================
@@ -49,8 +48,7 @@ class WorkExperienceResponse(WorkExperienceBase):
     id: int
     profile_id: int
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ==========================================
@@ -98,6 +96,29 @@ class ProfileBase(BaseModel):
 class ProfileCreate(ProfileBase):
     experiences: List[WorkExperienceCreate] = Field(default_factory=list)
     languages: List[LanguageCreate] = Field(default_factory=list)
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "full_name": "Ahmed Ali",
+                "gender": "male",
+                "date_of_birth": "2000-01-15",
+                "nationality": "Jordanian",
+                "country_of_residence": "Jordan",
+                "country": "Jordan",
+                "city": "Amman",
+                "phone_number": "+962790000000",
+                "degree": "Bachelor",
+                "major": "Computer Science",
+                "institution_name": "University of Jordan",
+                "graduation_year": 2024,
+                "gpa": 84.5,
+                "gpa_scale": "100",
+                "experiences": [],
+                "languages": [],
+            }
+        }
+    )
 
     @field_validator(
         "full_name", "gender", "nationality", "country_of_residence",
@@ -180,5 +201,4 @@ class ProfileResponse(ProfileBase):
     experiences: List[WorkExperienceResponse] = Field(default_factory=list)
     languages: List[LanguageResponse] = Field(default_factory=list)
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
