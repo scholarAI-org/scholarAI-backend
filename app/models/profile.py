@@ -1,7 +1,88 @@
-from sqlalchemy import Boolean, Column, Date, Float, ForeignKey, Integer, String, Text
+import enum
+
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    Date,
+    Enum,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    DateTime,
+    func,
+)
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
+
+
+class Gender(str, enum.Enum):
+    MALE = "MALE"
+    FEMALE = "FEMALE"
+
+
+class FinancialStatus(str, enum.Enum):
+    LIMITED = "LIMITED"
+    MODERATE = "MODERATE"
+    STABLE = "STABLE"
+
+
+class AcademicLevel(str, enum.Enum):
+    TAWJIHI = "TAWJIHI"  # توجيهي / ثانوية عامة
+    BACHELOR = "BACHELOR"
+    MASTER = "MASTER"
+    PHD = "PHD"
+
+
+class FieldOfStudy(str, enum.Enum):
+    # فروع التوجيهي
+    SCIENTIFIC = "SCIENTIFIC"
+    LITERARY = "LITERARY"
+    SHARIA = "SHARIA"
+    INDUSTRIAL = "INDUSTRIAL"
+    ENTREPRENEURSHIP_BUSINESS = "ENTREPRENEURSHIP_BUSINESS"
+    AGRICULTURAL = "AGRICULTURAL"
+    HOME_ECONOMICS = "HOME_ECONOMICS"
+
+    # التخصصات الجامعية
+    ENGINEERING = "ENGINEERING"
+    COMPUTER_SCIENCE = "COMPUTER_SCIENCE"
+    MEDICINE = "MEDICINE"
+    BUSINESS = "BUSINESS"
+    ARTS = "ARTS"
+    OTHER = "OTHER"
+
+
+class GPAScale(str, enum.Enum):
+    SCALE_4 = "SCALE_4"
+    SCALE_5 = "SCALE_5"
+    SCALE_10 = "SCALE_10"
+    SCALE_100 = "SCALE_100"
+
+
+class DesiredDegreeLevel(str, enum.Enum):
+    BACHELOR = "BACHELOR"
+    MASTER = "MASTER"
+    PHD = "PHD"
+    DIPLOMA = "DIPLOMA"
+    OTHER = "OTHER"
+
+
+class FundingType(str, enum.Enum):
+    FULL = "FULL"
+    PARTIAL = "PARTIAL"
+    SELF = "SELF"
+    ANY = "ANY"
+
+
+class ExperienceType(str, enum.Enum):
+    WORK = "WORK"
+    VOLUNTEER = "VOLUNTEER"
+    RESEARCH = "RESEARCH"
+    STUDENT_ACTIVITY = "STUDENT_ACTIVITY"
 
 
 class Profile(Base):
@@ -9,83 +90,73 @@ class Profile(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(
-        Integer,
-        ForeignKey("users.id", ondelete="CASCADE"),
-        unique=True,
-        nullable=False
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False
     )
 
-    # Personal Information
-    full_name = Column(String, nullable=False)
-    gender = Column(String, nullable=False)
-    marital_status = Column(String, nullable=True)
-    date_of_birth = Column(Date, nullable=False)
-    country_of_birth = Column(String, nullable=True)
-    nationality = Column(String, nullable=False)
-    country_of_residence = Column(String, nullable=False)
-    id_type = Column(String, nullable=True)
-    id_number = Column(String, nullable=True)
+    # Personal Info
+    first_name = Column(String(50), nullable=True)
+    last_name = Column(String(50), nullable=True)
+    # NOTE: email is stored in the users table; this column is kept for denormalization/caching only.
+    # It is NOT the source of truth — always read/write email via the User model.
+    email = Column(String(255), nullable=True, index=True)
+    birth_date = Column(Date, nullable=True)
+    gender = Column(Enum(Gender), nullable=True)
+    nationality = Column(String(2), nullable=True)  # ISO 2-letter
+    country_of_residence = Column(String(2), nullable=True)  # ISO 2-letter
+    phone_number = Column(String(20), nullable=True)
+    city = Column(String(100), nullable=True)
+    financial_status = Column(Enum(FinancialStatus), nullable=True)
+    id_number = Column(String(9), nullable=True)
+    passport_number = Column(String(20), nullable=True)
 
-    # Family & Financial Information
-    father_name = Column(String, nullable=True)
-    mother_name = Column(String, nullable=True)
-    father_income = Column(Float, default=0.0)
-    mother_income = Column(Float, default=0.0)
-    num_of_siblings = Column(Integer, default=0)
-    currency = Column(String, default="USD")
+    # Academic Info
+    academic_level = Column(Enum(AcademicLevel), nullable=True)
+    field_of_study = Column(Enum(FieldOfStudy), nullable=True)
+    institution = Column(String(255), nullable=True)
+    gpa_value = Column(Float, nullable=True)
+    gpa_scale = Column(Enum(GPAScale), nullable=True)
+    current_study_language = Column(JSON, default=list)  # List[str]
+    expected_graduation_year = Column(Integer, nullable=True)
 
-    # Contact Information
-    country = Column(String, nullable=False)
-    city = Column(String, nullable=False)
-    address = Column(Text, nullable=True)
-    phone_number = Column(String, nullable=False)
+    # Documents (JSON Object matching Documents schema)
+    # NOTE: named 'documents_data' to match API/service layer references.
+    documents_data = Column("documents", JSON, default=dict)
 
-    # Academic Background
-    degree = Column(String, nullable=False)
-    major = Column(String, nullable=False)
-    institution_name = Column(String, nullable=False)
-    graduation_year = Column(Integer, nullable=False)
-    gpa = Column(Float, nullable=False)
-    gpa_scale = Column(String, default="100")
+    # Skills and Languages (JSON Object matching SkillsAndLanguages schema)
+    languages_data = Column(JSON, default=list)
+    skills_data = Column(JSON, default=list)
 
-    # Relationships
+    desired_degree_level = Column(Enum(DesiredDegreeLevel), nullable=True)
+    funding_type = Column(Enum(FundingType), nullable=True)
+    preferred_fields_of_study = Column(JSON, default=list)
+    preferred_countries = Column(JSON, default=list)
+    is_completed = Column(Boolean, default=False)
+
+
+    # Meta
+    profile_completion_percentage = Column(Float, default=0.0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
     user = relationship("User", back_populates="profile")
     experiences = relationship(
-        "WorkExperience",
-        back_populates="profile",
-        cascade="all, delete-orphan"
-    )
-    languages = relationship(
-        "LanguageDetail",
-        back_populates="profile",
-        cascade="all, delete-orphan"
+        "Experience", back_populates="profile", cascade="all, delete-orphan"
     )
 
-class WorkExperience(Base):
-    __tablename__ = "work_experiences"
+
+class Experience(Base):
+    __tablename__ = "experiences"
 
     id = Column(Integer, primary_key=True, index=True)
-    profile_id = Column(Integer, ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False)
-    
-    company_name = Column(String, nullable=False)
-    role_title = Column(String, nullable=True)
-    employment_type = Column(String, nullable=True)
-    location = Column(String, nullable=True)
-    start_date = Column(Date, nullable=True)
+    profile_id = Column(
+        Integer, ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False
+    )
+    experience_type = Column(Enum(ExperienceType), nullable=False)
+    title = Column(String(250), nullable=False)
+    organization = Column(String(250), nullable=False)
+    start_date = Column(Date, nullable=False)
     end_date = Column(Date, nullable=True)
     is_current = Column(Boolean, default=False)
+    description = Column(Text, nullable=True)
 
     profile = relationship("Profile", back_populates="experiences")
-
-
-class LanguageDetail(Base):
-    __tablename__ = "language_details"
-
-    id = Column(Integer, primary_key=True, index=True)
-    profile_id = Column(Integer, ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False)
-
-    language_name = Column(String, nullable=False)
-    proficiency_level = Column(String, nullable=True)
-    certificate_url = Column(String, nullable=True)
-
-    profile = relationship("Profile", back_populates="languages")

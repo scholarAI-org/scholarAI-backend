@@ -1,205 +1,583 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from datetime import date, datetime, timezone
 from typing import List
 
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from sqlalchemy.orm import Session
+
 from app.core.database import get_db
+from app.core.security import get_current_user
+from app.models.profile import Experience, Profile
 from app.models.user import User
-from app.models.profile import Profile, WorkExperience, LanguageDetail
 from app.schemas.profile import (
-    ProfileCreate, 
-    ProfileUpdate, 
-    ProfileResponse, 
-    WorkExperienceCreate, 
-    WorkExperienceResponse, 
-    LanguageCreate, 
-    LanguageResponse
+    AcademicInfo,
+    AcademicLevel,
+    Documents,
+    ExperienceCreate,
+    ExperienceResponse,
+    ExperienceUpdate,
+    FieldOfStudy,
+    Gender,
+    GPA,
+    GPAScale,
+    LanguageItem,
+    PersonalInfo,
+    PreferencesResponse,
+    PreferencesUpdate,
+    SkillsAndLanguages,
+    SkillsAndLanguagesSuggestions,
+    UploadedFile,
+    UploadStatus,
+    UserProfile,
+    calculate_profile_completion,
 )
-from app.core.security import get_current_user  # دالة التحقق من التوكن للمستخدم الحالي
 
-router = APIRouter(
-    prefix="/profile",
-    tags=["Profile"]
-)
+router = APIRouter(prefix="/profile", tags=["Profile"])
 
-@router.post(
-    "/",
-    response_model=ProfileResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Create profile",
-    description="Creates the current user's profile. Requires Bearer token.",
-    responses={
-        400: {"description": "Profile already exists"},
-        401: {"description": "Missing or invalid Bearer token"},
-    },
-)
-def create_profile(
-    profile_data: ProfileCreate, 
-    db: Session = Depends(get_db), 
-    current_user: User = Depends(get_current_user)
-):
-    # التأكد من عدم وجود بروفايل سابق للمستخدم
-    existing_profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
-    if existing_profile:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, 
-            detail="Profile already exists for this user."
+
+# ==========================================
+# Helper Function: Build Response & Calculate Completion
+# ==========================================
+def build_full_profile_response(profile: Profile, user: User) -> UserProfile:
+    # المعلومات الشخصية — تتعامل مع profile فارغ (مستخدم جديد لم يُكمل بياناته)
+    personal_info = None
+    if profile.first_name and profile.last_name and profile.birth_date and profile.gender and profile.nationality and profile.country_of_residence:
+        personal_info = PersonalInfo(
+            first_name=profile.first_name,
+            last_name=profile.last_name,
+            email=user.email,
+            phone_number=profile.phone_number,
+            gender=profile.gender,
+            birth_date=profile.birth_date,
+            nationality=profile.nationality,
+            country_of_residence=profile.country_of_residence,
+            city=profile.city,
+            financial_status=profile.financial_status,
+            id_number=profile.id_number,
+            passport_number=profile.passport_number,
         )
 
-    # تفكيك بيانات البروفايل وفصل القوائم (Experiences & Languages)
-    data_dict = profile_data.model_dump()
-    experiences_data = data_dict.pop("experiences", [])
-    languages_data = data_dict.pop("languages", [])
+    # المعلومات الأكاديمية — None إذا لم تُكمل بعد
+    academic_info = None
+    if profile.field_of_study and profile.academic_level and profile.institution:
+        gpa = GPA(value=profile.gpa_value, scale=profile.gpa_scale) if profile.gpa_value is not None and profile.gpa_scale else None
+        academic_info = AcademicInfo(
+            field_of_study=profile.field_of_study,
+            academic_level=profile.academic_level,
+            gpa=gpa,
+            institution=profile.institution,
+            current_study_language=profile.current_study_language or [],
+            expected_graduation_year=profile.expected_graduation_year,
+        )
 
-    # إنشاء سجل البروفايل الرئيسي
-    new_profile = Profile(**data_dict, user_id=current_user.id)
-    db.add(new_profile)
-    db.commit()
-    db.refresh(new_profile)
+    documents_data = (
+        Documents.model_validate(profile.documents_data)
+        if profile.documents_data
+        else Documents()
+    )
 
-    # إضافة خبرات العمل إن وجدت
-    for exp in experiences_data:
-        db.add(WorkExperience(**exp, profile_id=new_profile.id))
+    languages_list = (
+        [LanguageItem(**lang) for lang in profile.languages_data]
+        if profile.languages_data
+        else []
+    )
 
-    # إضافة اللغات إن وجدت
-    for lang in languages_data:
-        db.add(LanguageDetail(**lang, profile_id=new_profile.id))
+    skills_and_languages = SkillsAndLanguages(
+        languages=languages_list, skills=profile.skills_data or []
+    )
 
-    db.commit()
-    db.refresh(new_profile)
-    return new_profile
+    experiences_list = [
+        ExperienceResponse.model_validate(exp) for exp in (profile.experiences or [])
+    ]
+
+    preferences_data = PreferencesResponse(
+        desired_degree_level=profile.desired_degree_level,
+        funding_type=profile.funding_type,
+        preferred_fields_of_study=profile.preferred_fields_of_study or [],
+        preferred_countries=profile.preferred_countries or [],
+        is_profile_completed=bool(profile.desired_degree_level and profile.funding_type),
+    )
+
+    completion_percentage = calculate_profile_completion(
+        personal_info=personal_info,
+        academic_info=academic_info,
+        documents=documents_data,
+        skills_and_languages=skills_and_languages,
+        experiences=experiences_list,
+        preferences=preferences_data,
+    )
+
+    return UserProfile(
+        id=profile.id,
+        user_id=profile.user_id,
+        personal_info=personal_info,
+        academic_info=academic_info,
+        documents=documents_data,
+        skills_and_languages=skills_and_languages,
+        experiences=experiences_list,
+        preferences=preferences_data,
+        profile_completion_percentage=completion_percentage,
+    )
 
 
-@router.get(
-    "/me",
-    response_model=ProfileResponse,
-    summary="Get current user profile",
-    responses={
-        401: {"description": "Missing or invalid Bearer token"},
-        404: {"description": "Profile not found"},
-    },
-)
-def get_my_profile(
-    db: Session = Depends(get_db), 
-    current_user: User = Depends(get_current_user)
+# ==========================================
+# GET /profile/personal-info
+# ==========================================
+@router.get("/personal-info", response_model=PersonalInfo)
+def get_personal_info(
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
 ):
     profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
     if not profile:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, 
-            detail="Profile not found."
+            status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found."
         )
-    return profile
+
+    return PersonalInfo(
+        first_name=profile.first_name or "",
+        last_name=profile.last_name or "",
+        email=current_user.email,
+        phone_number=profile.phone_number or "",
+        gender=profile.gender,
+        birth_date=profile.birth_date,
+        nationality=profile.nationality or "",
+        country_of_residence=profile.country_of_residence or "",
+        city=profile.city,
+        financial_status=profile.financial_status,
+        id_number=profile.id_number,
+        passport_number=profile.passport_number,
+    )
 
 
-@router.put(
-    "/me",
-    response_model=ProfileResponse,
-    summary="Update current user profile",
-    description="Partial update. Required profile fields cannot be set to null.",
-    responses={
-        401: {"description": "Missing or invalid Bearer token"},
-        404: {"description": "Profile not found"},
-        422: {"description": "Required field set to null or placeholder value"},
-    },
-)
-def update_profile(
-    profile_data: ProfileUpdate, 
-    db: Session = Depends(get_db), 
-    current_user: User = Depends(get_current_user)
+# ==========================================
+# PUT /profile/personal-info
+# ==========================================
+@router.put("/personal-info", response_model=PersonalInfo)
+def update_personal_info(
+    data: PersonalInfo,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
-    if not profile:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, 
-            detail="Profile not found."
-        )
-
-    # تحديث الحقول التي أُرسلت فقط (Exclude Unset)
-    update_data = profile_data.model_dump(exclude_unset=True)
-
-    required_fields = {
-        "full_name",
-        "gender",
-        "date_of_birth",
-        "nationality",
-        "country_of_residence",
-        "country",
-        "city",
-        "phone_number",
-        "degree",
-        "major",
-        "institution_name",
-        "graduation_year",
-        "gpa",
-    }
-
-    for key, value in update_data.items():
-        if key in required_fields and value is None:
+    # 1. تحديث البريد الإلكتروني في كائن User إذا تغير
+    if data.email != current_user.email:
+        existing_user = db.query(User).filter(User.email == data.email).first()
+        if existing_user:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"{key} cannot be null."
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="البريد الإلكتروني مستخدم بالفعل من قبل حساب آخر.",
             )
+        current_user.email = data.email
 
-        setattr(profile, key, value)
+    # 2. جلب الـ Profile أو إنشائه إن لم يكن موجوداً
+    profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
+    if not profile:
+        profile = Profile(user_id=current_user.id)
+        db.add(profile)
+
+    # 3. تحديث بيانات الـ Profile
+    profile.first_name = data.first_name
+    profile.last_name = data.last_name
+    profile.email = data.email          # مزامنة email في profiles أيضاً
+    profile.phone_number = data.phone_number
+    profile.gender = data.gender
+    profile.birth_date = data.birth_date
+    profile.nationality = data.nationality
+    profile.country_of_residence = data.country_of_residence
+    profile.city = data.city
+    profile.financial_status = data.financial_status
+    profile.id_number = data.id_number
+    profile.passport_number = data.passport_number
+
+    # 4. حفظ التغييرات لكل من User و Profile
+    db.commit()
+    db.refresh(current_user)
+    db.refresh(profile)
+
+    return PersonalInfo(
+        first_name=profile.first_name,
+        last_name=profile.last_name,
+        email=current_user.email,
+        phone_number=profile.phone_number,
+        gender=profile.gender,
+        birth_date=profile.birth_date,
+        nationality=profile.nationality,
+        country_of_residence=profile.country_of_residence,
+        city=profile.city,
+        financial_status=profile.financial_status,
+        id_number=profile.id_number,
+        passport_number=profile.passport_number,
+    )
+
+
+
+# ==========================================
+# GET /profile/academic-info
+# ==========================================
+@router.get("/academic-info", response_model=AcademicInfo)
+def get_academic_info(
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+):
+    profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
+    if not profile or not profile.field_of_study:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Academic information not found.",
+        )
+
+    return AcademicInfo(
+        field_of_study=profile.field_of_study,
+        academic_level=profile.academic_level,
+        gpa=GPA(value=profile.gpa_value, scale=profile.gpa_scale) if profile.gpa_value is not None and profile.gpa_scale else None,
+        institution=profile.institution or "",
+        current_study_language=profile.current_study_language or [],
+        expected_graduation_year=profile.expected_graduation_year,
+    )
+
+
+# ==========================================
+# PUT /profile/academic-info
+# ==========================================
+@router.put("/academic-info", response_model=AcademicInfo)
+def update_academic_info(
+    data: AcademicInfo,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
+
+    if not profile:
+        profile = Profile(user_id=current_user.id)
+        db.add(profile)
+
+    profile.field_of_study = data.field_of_study
+    profile.academic_level = data.academic_level
+    # gpa اختياري — لا تُحدَّث إذا لم يُرسَل
+    if data.gpa is not None:
+        profile.gpa_value = data.gpa.value
+        profile.gpa_scale = data.gpa.scale
+    profile.institution = data.institution
+    profile.current_study_language = data.current_study_language
+    profile.expected_graduation_year = data.expected_graduation_year
 
     db.commit()
     db.refresh(profile)
-    return profile
+
+    return AcademicInfo(
+        field_of_study=profile.field_of_study,
+        academic_level=profile.academic_level,
+        gpa=GPA(value=profile.gpa_value, scale=profile.gpa_scale) if profile.gpa_value is not None and profile.gpa_scale else None,
+        institution=profile.institution,
+        current_study_language=profile.current_study_language or [],
+        expected_graduation_year=profile.expected_graduation_year,
+    )
+
+
+# ==========================================
+# Upload / Documents Endpoints
+# ==========================================
+@router.post("/documents/upload", response_model=UploadedFile)
+def upload_document(
+    file: UploadFile = File(...), current_user: User = Depends(get_current_user)
+):
+    file_content = file.file.read()
+    file_size = len(file_content)
+
+    fake_file_url = (
+        f"https://storage.scholarai.com/uploads/{current_user.id}/{file.filename}"
+    )
+
+    return UploadedFile(
+        status=UploadStatus.UPLOADED,
+        file_url=fake_file_url,
+        file_name=file.filename,
+        file_type=file.content_type,
+        file_size=file_size,
+        uploaded_at=datetime.now(timezone.utc),
+    )
+
+
+@router.get("/documents", response_model=Documents)
+def get_documents(
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+):
+    profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
+
+    if not profile or not profile.documents_data:
+        return Documents()
+
+    return Documents.model_validate(profile.documents_data)
+
+
+@router.put("/documents", response_model=Documents)
+def update_documents(
+    data: Documents,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
+
+    if not profile:
+        profile = Profile(user_id=current_user.id)
+        db.add(profile)
+
+    profile.documents_data = data.model_dump(mode="json", by_alias=True)
+
+    db.commit()
+    db.refresh(profile)
+
+    return data
+
+
+# ==========================================
+# Skills & Languages Endpoints
+# ==========================================
+@router.get("/skills-and-languages", response_model=SkillsAndLanguages)
+def get_skills_and_languages(
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+):
+    profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
+
+    if not profile:
+        return SkillsAndLanguages()
+
+    languages_list = (
+        [LanguageItem(**lang) for lang in profile.languages_data]
+        if profile.languages_data
+        else []
+    )
+
+    return SkillsAndLanguages(
+        languages=languages_list, skills=profile.skills_data or []
+    )
+
+
+@router.get(
+    "/skills-and-languages/suggestions",
+    response_model=SkillsAndLanguagesSuggestions,
+)
+def get_suggestions():
+    return SkillsAndLanguagesSuggestions(
+        popular_languages=[
+            "العربية",
+            "الإنجليزيّة",
+            "التركية",
+            "الفرنسية",
+            "الإسبانية",
+            "الألمانية",
+        ],
+        suggested_skills_by_category={
+            "تقنية": [
+                "JavaScript",
+                "Python",
+                "React",
+                "Node.js",
+                "Docker",
+                "Power BI",
+                "Data Analysis",
+            ],
+            "تواصل": ["التواصل الفعال", "إدارة الوقت", "العمل الجماعي", "القيادة"],
+            "أخرى": ["إدارة المشاريع", "حل المشكلات", "التفكير النقدي"],
+        },
+    )
+
+
+@router.put("/skills-and-languages", response_model=SkillsAndLanguages)
+def update_skills_and_languages(
+    data: SkillsAndLanguages,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
+
+    if not profile:
+        profile = Profile(user_id=current_user.id)
+        db.add(profile)
+
+    profile.languages_data = [
+        lang.model_dump(mode="json", by_alias=True) for lang in data.languages
+    ]
+    profile.skills_data = data.skills
+
+    db.commit()
+    db.refresh(profile)
+
+    return data
+
+
+# ==========================================
+# Experiences Endpoints
+# ==========================================
+@router.get("/experiences", response_model=List[ExperienceResponse])
+def get_experiences(
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+):
+    profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
+    if not profile:
+        return []
+
+    return db.query(Experience).filter(Experience.profile_id == profile.id).all()
 
 
 @router.post(
     "/experiences",
-    response_model=WorkExperienceResponse,
+    response_model=ExperienceResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Add work experience",
-    responses={
-        401: {"description": "Missing or invalid Bearer token"},
-        404: {"description": "Create a profile first"},
-    },
 )
-def add_experience(
-    exp_data: WorkExperienceCreate, 
-    db: Session = Depends(get_db), 
-    current_user: User = Depends(get_current_user)
+def create_experience(
+    data: ExperienceCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
     if not profile:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, 
-            detail="Please create a profile first."
-        )
+        profile = Profile(user_id=current_user.id)
+        db.add(profile)
+        db.commit()
+        db.refresh(profile)
 
-    new_exp = WorkExperience(**exp_data.model_dump(), profile_id=profile.id)
+    new_exp = Experience(
+        profile_id=profile.id,
+        experience_type=data.experience_type,
+        title=data.title,
+        organization=data.organization,
+        start_date=data.start_date,
+        end_date=None if data.is_current else data.end_date,
+        is_current=data.is_current,
+        description=data.description,
+    )
+
     db.add(new_exp)
     db.commit()
     db.refresh(new_exp)
     return new_exp
 
 
-@router.post(
-    "/languages",
-    response_model=LanguageResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Add language",
-    responses={
-        401: {"description": "Missing or invalid Bearer token"},
-        404: {"description": "Create a profile first"},
-    },
-)
-def add_language(
-    lang_data: LanguageCreate, 
-    db: Session = Depends(get_db), 
-    current_user: User = Depends(get_current_user)
+@router.put("/experiences/{exp_id}", response_model=ExperienceResponse)
+def update_experience(
+    exp_id: int,
+    data: ExperienceUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
     if not profile:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, 
-            detail="Please create a profile first."
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found")
 
-    new_lang = LanguageDetail(**lang_data.model_dump(), profile_id=profile.id)
-    db.add(new_lang)
+    exp = (
+        db.query(Experience)
+        .filter(Experience.id == exp_id, Experience.profile_id == profile.id)
+        .first()
+    )
+    if not exp:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Experience item not found")
+
+    if data.experience_type is not None:
+        exp.experience_type = data.experience_type
+    if data.title is not None:
+        exp.title = data.title
+    if data.organization is not None:
+        exp.organization = data.organization
+    if data.start_date is not None:
+        exp.start_date = data.start_date
+    if data.is_current is not None:
+        exp.is_current = data.is_current
+        exp.end_date = None if data.is_current else data.end_date
+    elif data.end_date is not None:
+        exp.end_date = data.end_date
+    if data.description is not None:
+        exp.description = data.description
+
     db.commit()
-    db.refresh(new_lang)
-    return new_lang
+    db.refresh(exp)
+    return exp
+
+
+@router.delete("/experiences/{exp_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_experience(
+    exp_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
+    if not profile:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found")
+
+    exp = (
+        db.query(Experience)
+        .filter(Experience.id == exp_id, Experience.profile_id == profile.id)
+        .first()
+    )
+    if not exp:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Experience item not found")
+
+    db.delete(exp)
+    db.commit()
+    return None
+
+
+# ==========================================
+# Preferences Endpoints
+# ==========================================
+@router.get("/preferences", response_model=PreferencesResponse)
+def get_preferences(
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+):
+    profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
+
+    if not profile:
+        return PreferencesResponse()
+
+    return PreferencesResponse(
+        desired_degree_level=profile.desired_degree_level,
+        funding_type=profile.funding_type,
+        preferred_fields_of_study=profile.preferred_fields_of_study or [],
+        preferred_countries=profile.preferred_countries or [],
+        is_profile_completed=bool(profile.desired_degree_level and profile.funding_type),
+    )
+
+
+@router.put("/preferences", response_model=PreferencesResponse)
+def update_preferences(
+    data: PreferencesUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
+
+    if not profile:
+        profile = Profile(user_id=current_user.id)
+        db.add(profile)
+
+    profile.desired_degree_level = data.desired_degree_level
+    profile.funding_type = data.funding_type
+    profile.preferred_fields_of_study = data.preferred_fields_of_study
+    profile.preferred_countries = data.preferred_countries
+
+    db.commit()
+    db.refresh(profile)
+
+    return PreferencesResponse(
+        desired_degree_level=profile.desired_degree_level,
+        funding_type=profile.funding_type,
+        preferred_fields_of_study=profile.preferred_fields_of_study,
+        preferred_countries=profile.preferred_countries,
+        is_profile_completed=bool(profile.desired_degree_level and profile.funding_type),
+    )
+
+
+# ==========================================
+# GET /profile (البروفايل الكامل)
+# ==========================================
+@router.get("", response_model=UserProfile)
+def get_user_profile(
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+):
+    profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
+
+    # إذا لم يوجد profile (مستخدم قديم سبق التسجيل)، أنشئ واحداً فارغاً
+    if not profile:
+        profile = Profile(user_id=current_user.id)
+        db.add(profile)
+        db.commit()
+        db.refresh(profile)
+
+    return build_full_profile_response(profile, current_user)

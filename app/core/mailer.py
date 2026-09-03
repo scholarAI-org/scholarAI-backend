@@ -1,13 +1,19 @@
+import logging
 import resend
 from app.core.config import settings
+
+logger = logging.getLogger("uvicorn.error")
 
 # ضبط مفتاح الـ API الخاص بـ Resend
 resend.api_key = settings.RESEND_API_KEY
 
-def send_reset_password_email(email_to: str, token: str):
-    # رابط إعادة التعيين الذي سيصل في الإيميل
+def send_reset_password_email(email_to: str, token: str) -> bool:
+    """
+    إرسال بريد إعادة تعيين كلمة المرور.
+    يُرجع True عند النجاح، False عند الفشل.
+    """
     reset_link = f"{settings.FRONTEND_URL}/reset-password?token={token}"
-    
+
     html_content = f"""
     <div style="font-family: Arial, sans-serif; direction: rtl; text-align: right; padding: 20px;">
         <h2>طلب إعادة تعيين كلمة المرور - Scholar AI</h2>
@@ -20,11 +26,15 @@ def send_reset_password_email(email_to: str, token: str):
     """
 
     params = {
-        "from": "Scholar AI <onboarding@resend.dev>",  # الدومين المجاني التجريبي الموفر من Resend
+        "from": "Scholar AI <onboarding@resend.dev>",
         "to": [email_to],
         "subject": "إعادة تعيين كلمة المرور - Scholar AI",
         "html": html_content,
     }
 
-    # إرسال البريد
-    resend.Emails.send(params)
+    try:
+        resend.Emails.send(params)
+        return True
+    except Exception as exc:
+        logger.error("فشل إرسال بريد إعادة التعيين إلى %s: %s", email_to, exc)
+        return False
