@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.user import User
+from app.models.profile import Profile
 from app.schemas.user import (
     UserCreate, UserResponse, UserLogin, Token,
     ForgotPasswordRequest, ResetPasswordRequest, ChangePasswordRequest,
@@ -52,6 +53,12 @@ def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
 
     try:
         db.add(new_user)
+        db.flush()  # flush لنحصل على new_user.id قبل الـ commit
+
+        # إنشاء profile فارغ تلقائياً مرتبط بالمستخدم الجديد
+        new_profile = Profile(user_id=new_user.id)
+        db.add(new_profile)
+
         db.commit()
         db.refresh(new_user)
         return new_user

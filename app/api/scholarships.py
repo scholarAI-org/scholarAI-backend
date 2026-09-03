@@ -4,7 +4,9 @@ from sqlalchemy.exc import IntegrityError
 from typing import Optional
 
 from app.core.database import get_db
+from app.core.security import get_current_user
 from app.models import Scholarship
+from app.models.user import User
 from app.schemas import ScholarshipCreate, ScholarshipResponse, ScholarshipExistsResponse
 
 router = APIRouter(prefix="/api/scholarships", tags=["Scholarships"])
@@ -39,13 +41,21 @@ def check_scholarship_exists(
     summary="Create a scholarship listing",
     responses={
         400: {"description": "Integrity / duplicate constraint error"},
+        403: {"description": "Requires admin role"},
         409: {"description": "Scholarship already exists for this source and source_id"},
     },
 )
 def create_scholarship(
     scholarship_data: ScholarshipCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),  # مصادقة مطلوبة
 ):
+    # تحقق من صلاحية المستخدم — admin فقط
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="هذه العملية مخصصة للمشرفين فقط.",
+        )
     # تحقق احترازي لمنع تكرار نفس المنحة إذا أُرسلت مجدداً
     if scholarship_data.source_id:
         existing = db.query(Scholarship).filter(
