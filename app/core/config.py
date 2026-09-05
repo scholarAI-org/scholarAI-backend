@@ -26,6 +26,7 @@ class Settings(BaseSettings):
 
     RESEND_API_KEY: Optional[str] = None
 
+    EMAIL_VERIFICATION_ENABLED: bool = False
     EMAIL_VERIFICATION_OTP_EXPIRE_MINUTES: int = 10
     EMAIL_VERIFICATION_OTP_RESEND_COOLDOWN_SECONDS: int = 60
 settings = Settings()
