@@ -1,299 +1,252 @@
-"""update profile model schemas and enums
+"""replace the legacy profile schema with profile v2
 
 Revision ID: 1023f6ed1956
 Revises: 20260827_01
 Create Date: 2026-09-02 12:16:56.936945
 
+The profile-v2 API is not compatible with the legacy profile, work-experience,
+and language tables. This migration deliberately refuses to rebuild populated
+legacy tables so an operator cannot lose user data accidentally.
 """
-from typing import Sequence, Union
+from collections.abc import Sequence
+
+import sqlalchemy as sa
 
 from alembic import op
-import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
 
-# revision identifiers, used by Alembic.
-revision: str = '1023f6ed1956'
-down_revision: Union[str, Sequence[str], None] = '20260827_01'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision: str = "1023f6ed1956"
+down_revision: str | Sequence[str] | None = "20260827_01"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
+
+
+def _inspector() -> sa.Inspector:
+    return sa.inspect(op.get_bind())
+
+
+def _has_table(table_name: str) -> bool:
+    return table_name in _inspector().get_table_names()
+
+
+def _columns(table_name: str) -> set[str]:
+    return {column["name"] for column in _inspector().get_columns(table_name)}
+
+
+def _row_count(table_name: str) -> int:
+    if not _has_table(table_name):
+        return 0
+    quoted_name = op.get_bind().dialect.identifier_preparer.quote(table_name)
+    return op.get_bind().execute(
+        sa.text(f"SELECT count(*) FROM {quoted_name}")
+    ).scalar_one()
+
+
+def _drop_empty_legacy_profile_schema() -> None:
+    legacy_tables = ("profiles", "work_experiences", "language_details")
+    populated = [name for name in legacy_tables if _row_count(name)]
+    if populated:
+        names = ", ".join(populated)
+        raise RuntimeError(
+            "Profile-v2 migration stopped to protect legacy data in: " + names
+        )
+
+    # Child tables must be removed before profiles because of foreign keys.
+    for table_name in ("language_details", "work_experiences", "profiles"):
+        if _has_table(table_name):
+            op.drop_table(table_name)
+
+
+def _create_profiles() -> None:
+    op.create_table(
+        "profiles",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("user_id", sa.Integer(), nullable=False),
+        sa.Column("first_name", sa.String(length=50), nullable=True),
+        sa.Column("last_name", sa.String(length=50), nullable=True),
+        sa.Column("email", sa.String(length=255), nullable=True),
+        sa.Column("birth_date", sa.Date(), nullable=True),
+        sa.Column(
+            "gender",
+            sa.Enum("MALE", "FEMALE", name="gender"),
+            nullable=True,
+        ),
+        sa.Column("nationality", sa.String(length=2), nullable=True),
+        sa.Column("country_of_residence", sa.String(length=2), nullable=True),
+        sa.Column("phone_number", sa.String(length=20), nullable=True),
+        sa.Column("city", sa.String(length=100), nullable=True),
+        sa.Column(
+            "financial_status",
+            sa.Enum("LIMITED", "MODERATE", "STABLE", name="financialstatus"),
+            nullable=True,
+        ),
+        sa.Column("id_number", sa.String(length=9), nullable=True),
+        sa.Column("passport_number", sa.String(length=20), nullable=True),
+        sa.Column(
+            "academic_level",
+            sa.Enum("BACHELOR", "MASTER", "PHD", name="academiclevel"),
+            nullable=True,
+        ),
+        sa.Column(
+            "field_of_study",
+            sa.Enum(
+                "ENGINEERING",
+                "COMPUTER_SCIENCE",
+                "MEDICINE",
+                "BUSINESS",
+                "ARTS",
+                "OTHER",
+                name="fieldofstudy",
+            ),
+            nullable=True,
+        ),
+        sa.Column("institution", sa.String(length=255), nullable=True),
+        sa.Column("gpa_value", sa.Float(), nullable=True),
+        sa.Column(
+            "gpa_scale",
+            sa.Enum(
+                "SCALE_4",
+                "SCALE_5",
+                "SCALE_10",
+                "SCALE_100",
+                name="gpascale",
+            ),
+            nullable=True,
+        ),
+        sa.Column(
+            "current_study_language",
+            sa.JSON(),
+            nullable=True,
+            server_default=sa.text("'[]'::json"),
+        ),
+        sa.Column("expected_graduation_year", sa.Integer(), nullable=True),
+        sa.Column(
+            "documents",
+            sa.JSON(),
+            nullable=True,
+            server_default=sa.text("'{}'::json"),
+        ),
+        sa.Column(
+            "languages_data",
+            sa.JSON(),
+            nullable=True,
+            server_default=sa.text("'[]'::json"),
+        ),
+        sa.Column(
+            "skills_data",
+            sa.JSON(),
+            nullable=True,
+            server_default=sa.text("'[]'::json"),
+        ),
+        sa.Column(
+            "desired_degree_level",
+            sa.Enum(
+                "BACHELOR",
+                "MASTER",
+                "PHD",
+                "DIPLOMA",
+                "OTHER",
+                name="desireddegreelevel",
+            ),
+            nullable=True,
+        ),
+        sa.Column(
+            "funding_type",
+            sa.Enum("FULL", "PARTIAL", "SELF", "ANY", name="fundingtype"),
+            nullable=True,
+        ),
+        sa.Column(
+            "preferred_fields_of_study",
+            sa.JSON(),
+            nullable=True,
+            server_default=sa.text("'[]'::json"),
+        ),
+        sa.Column(
+            "preferred_countries",
+            sa.JSON(),
+            nullable=True,
+            server_default=sa.text("'[]'::json"),
+        ),
+        sa.Column(
+            "is_completed",
+            sa.Boolean(),
+            nullable=True,
+            server_default=sa.false(),
+        ),
+        sa.Column(
+            "profile_completion_percentage",
+            sa.Float(),
+            nullable=True,
+            server_default="0",
+        ),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            nullable=True,
+            server_default=sa.func.now(),
+        ),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
+        sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("user_id"),
+    )
+    op.create_index("ix_profiles_id", "profiles", ["id"], unique=False)
+    op.create_index("ix_profiles_email", "profiles", ["email"], unique=False)
+
+
+def _create_experiences() -> None:
+    op.create_table(
+        "experiences",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("profile_id", sa.Integer(), nullable=False),
+        sa.Column(
+            "experience_type",
+            sa.Enum(
+                "WORK",
+                "VOLUNTEER",
+                "RESEARCH",
+                "STUDENT_ACTIVITY",
+                name="experiencetype",
+            ),
+            nullable=False,
+        ),
+        sa.Column("title", sa.String(length=250), nullable=False),
+        sa.Column("organization", sa.String(length=250), nullable=False),
+        sa.Column("start_date", sa.Date(), nullable=False),
+        sa.Column("end_date", sa.Date(), nullable=True),
+        sa.Column(
+            "is_current",
+            sa.Boolean(),
+            nullable=True,
+            server_default=sa.false(),
+        ),
+        sa.Column("description", sa.Text(), nullable=True),
+        sa.ForeignKeyConstraint(
+            ["profile_id"], ["profiles.id"], ondelete="CASCADE"
+        ),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_index("ix_experiences_id", "experiences", ["id"], unique=False)
 
 
 def upgrade() -> None:
-    # ### commands auto generated by Alembic - please adjust! ###
-    op.create_table('scholarships',
-    sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('source', sa.String(length=20), nullable=False, comment="Origin of the listing: 'for9a' or 'ministry'."),
-    sa.Column('source_id', sa.String(length=50), nullable=True, comment='Stable identifier from the source site, used with source to prevent duplicates.'),
-    sa.Column('title', sa.Text(), nullable=False, comment='Display title of the scholarship.'),
-    sa.Column('slug', sa.String(length=100), nullable=True, comment='URL-friendly identifier.'),
-    sa.Column('source_url', sa.Text(), nullable=True, comment='Canonical page URL on the source site.'),
-    sa.Column('organization_name', sa.Text(), nullable=True, comment='Granting organization.'),
-    sa.Column('country', sa.String(length=100), nullable=True, comment='Host or destination country.'),
-    sa.Column('deadline', sa.Date(), nullable=True, comment='Application deadline when known.'),
-    sa.Column('no_deadline', sa.Boolean(), server_default='false', nullable=True, comment='True when the listing has no fixed deadline.'),
-    sa.Column('image_url', sa.Text(), nullable=True, comment='Cover or listing image URL.'),
-    sa.Column('description_html', sa.Text(), nullable=True, comment='Full description HTML from the source.'),
-    sa.Column('benefits_html', sa.Text(), nullable=True, comment='Benefits / funding HTML.'),
-    sa.Column('qualifications_html', sa.Text(), nullable=True, comment='Eligibility / qualifications HTML.'),
-    sa.Column('apply_link', sa.Text(), nullable=True, comment='External application URL.'),
-    sa.Column('apply_email', sa.String(length=255), nullable=True, comment='Application contact email.'),
-    sa.Column('apply_phone', sa.String(length=50), nullable=True, comment='Application contact phone.'),
-    sa.Column('pdf_url', sa.Text(), nullable=True, comment='Primary PDF attachment from ministry listings.'),
-    sa.Column('attachments', postgresql.ARRAY(sa.Text()), nullable=True, comment='Additional attachment URLs from ministry listings.'),
-    sa.Column('is_extension', sa.Boolean(), server_default='false', nullable=True, comment='True when the ministry listing extends an existing scholarship.'),
-    sa.Column('status', sa.String(length=20), server_default='pending', nullable=True, comment='Review workflow: pending, approved, or rejected.'),
-    sa.Column('scraped_at', sa.DateTime(timezone=True), nullable=True, comment='When the listing was scraped.'),
-    sa.Column('reviewed_at', sa.DateTime(timezone=True), nullable=True, comment='When a reviewer last acted on the listing.'),
-    sa.Column('reviewed_by', sa.String(length=100), nullable=True, comment='Reviewer identifier (email or username).'),
-    sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('source', 'source_id', name='unique_source_record'),
-    comment='Scholarship listings ingested from scrapers (for9a, ministry) and held for review before publication.'
-    )
-    op.create_index('ix_scholarships_country', 'scholarships', ['country'], unique=False)
-    op.create_index('ix_scholarships_deadline', 'scholarships', ['deadline'], unique=False)
-    op.create_index(op.f('ix_scholarships_id'), 'scholarships', ['id'], unique=False)
-    op.create_index('ix_scholarships_source', 'scholarships', ['source'], unique=False)
-    op.create_index('ix_scholarships_status', 'scholarships', ['status'], unique=False)
-    op.drop_index(op.f('ix_language_details_id'), table_name='language_details')
-    op.drop_table('language_details')
-    op.drop_index(op.f('ix_work_experiences_id'), table_name='work_experiences')
-    op.drop_table('work_experiences')
-    op.drop_column('experiences', 'preferred_countries')
-    op.drop_column('experiences', 'gender')
-    op.drop_column('experiences', 'academic_level')
-    op.drop_column('experiences', 'country_of_residence')
-    op.drop_column('experiences', 'desired_degree_level')
-    op.drop_column('experiences', 'field_of_study')
-    op.drop_column('experiences', 'financial_status')
-    op.drop_column('experiences', 'institution')
-    op.drop_column('experiences', 'birth_date')
-    op.drop_column('experiences', 'nationality')
-    op.drop_column('experiences', 'passport_number')
-    op.drop_column('experiences', 'languages_data')
-    op.drop_column('experiences', 'phone_number')
-    op.drop_column('experiences', 'last_name')
-    op.drop_column('experiences', 'expected_graduation_year')
-    op.drop_column('experiences', 'funding_type')
-    op.drop_column('experiences', 'is_completed')
-    op.drop_column('experiences', 'current_study_language')
-    op.drop_column('experiences', 'first_name')
-    op.drop_column('experiences', 'preferred_fields_of_study')
-    op.drop_column('experiences', 'gpa_value')
-    op.drop_column('experiences', 'city')
-    op.drop_column('experiences', 'skills_data')
-    op.drop_column('experiences', 'gpa_scale')
-    op.drop_column('experiences', 'id_number')
-    op.drop_column('experiences', 'documents_data')
-    op.add_column('profiles', sa.Column('passport_number', sa.String(length=20), nullable=True))
-    op.add_column('profiles', sa.Column('documents', sa.JSON(), nullable=True))
-    op.add_column('profiles', sa.Column('profile_completion_percentage', sa.Float(), nullable=True))
-    op.add_column('profiles', sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True))
-    op.add_column('profiles', sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True))
-    op.alter_column('profiles', 'first_name',
-               existing_type=sa.VARCHAR(length=50),
-               nullable=True)
-    op.alter_column('profiles', 'last_name',
-               existing_type=sa.VARCHAR(length=50),
-               nullable=True)
-    op.alter_column('profiles', 'email',
-               existing_type=sa.VARCHAR(),
-               nullable=True)
-    op.alter_column('profiles', 'birth_date',
-               existing_type=sa.DATE(),
-               nullable=True)
-    op.alter_column('profiles', 'gender',
-               existing_type=sa.VARCHAR(),
-               type_=sa.Enum('MALE', 'FEMALE', name='gender'),
-               postgresql_using="CASE WHEN UPPER(gender) = 'MALE' THEN 'MALE'::gender WHEN UPPER(gender) = 'FEMALE' THEN 'FEMALE'::gender ELSE NULL END",
-               nullable=True)
-    op.alter_column('profiles', 'nationality',
-               existing_type=sa.VARCHAR(),
-               nullable=True)
-    op.alter_column('profiles', 'country_of_residence',
-               existing_type=sa.VARCHAR(),
-               nullable=True)
-    op.alter_column('profiles', 'academic_level',
-               existing_type=postgresql.ENUM('BACHELOR', 'MASTER', 'PHD', name='academiclevel'),
-               nullable=True)
-    op.alter_column('profiles', 'field_of_study',
-               existing_type=postgresql.ENUM('ENGINEERING', 'COMPUTER_SCIENCE', 'MEDICINE', 'BUSINESS', 'ARTS', 'OTHER', name='fieldofstudy'),
-               nullable=True)
-    op.alter_column('profiles', 'institution',
-               existing_type=sa.VARCHAR(length=255),
-               nullable=True)
-    op.alter_column('profiles', 'gpa_value',
-               existing_type=sa.DOUBLE_PRECISION(precision=53),
-               nullable=True)
-    op.alter_column('profiles', 'gpa_scale',
-               existing_type=sa.VARCHAR(),
-               type_=sa.Enum('SCALE_4', 'SCALE_5', 'SCALE_10', 'SCALE_100', name='gpascale'),
-               postgresql_using="CASE WHEN gpa_scale IN ('100', 'SCALE_100') THEN 'SCALE_100'::gpascale WHEN gpa_scale IN ('4', 'SCALE_4') THEN 'SCALE_4'::gpascale WHEN gpa_scale IN ('5', 'SCALE_5') THEN 'SCALE_5'::gpascale WHEN gpa_scale IN ('10', 'SCALE_10') THEN 'SCALE_10'::gpascale ELSE NULL END",
-               nullable=True)
-    op.alter_column('profiles', 'current_study_language',
-               existing_type=postgresql.ARRAY(sa.VARCHAR()),
-               type_=sa.JSON(),
-               postgresql_using="CASE WHEN current_study_language IS NULL THEN '[]'::json ELSE to_json(current_study_language) END",
-               existing_nullable=True)
-    op.create_index(op.f('ix_profiles_email'), 'profiles', ['email'], unique=False)
-    op.create_foreign_key(None, 'profiles', 'users', ['user_id'], ['id'], ondelete='CASCADE')
-    op.drop_column('profiles', 'num_of_siblings')
-    op.drop_column('profiles', 'id_type')
-    op.drop_column('profiles', 'address')
-    op.drop_column('profiles', 'country_of_birth')
-    op.drop_column('profiles', 'father_income')
-    op.drop_column('profiles', 'mother_income')
-    op.drop_column('profiles', 'mother_name')
-    op.drop_column('profiles', 'date_of_birth')
-    op.drop_column('profiles', 'graduation_year')
-    op.drop_column('profiles', 'full_name')
-    op.drop_column('profiles', 'major')
-    op.drop_column('profiles', 'marital_status')
-    op.drop_column('profiles', 'country')
-    op.drop_column('profiles', 'currency')
-    op.drop_column('profiles', 'degree')
-    op.drop_column('profiles', 'institution_name')
-    op.drop_column('profiles', 'father_name')
-    op.drop_column('profiles', 'gpa')
-    op.drop_column('profiles', 'passport_status')
-    op.drop_column('profiles', 'documents_data')
-    op.alter_column('users', 'created_at',
-               existing_type=postgresql.TIMESTAMP(timezone=True),
-               type_=sa.DateTime(),
-               existing_nullable=True,
-               existing_server_default=sa.text('now()'))
-    # ### end Alembic commands ###
+    if _has_table("profiles") and "first_name" not in _columns("profiles"):
+        _drop_empty_legacy_profile_schema()
+
+    if not _has_table("profiles"):
+        _create_profiles()
+    if not _has_table("experiences"):
+        _create_experiences()
 
 
 def downgrade() -> None:
-    # ### commands auto generated by Alembic - please adjust! ###
-    op.alter_column('users', 'created_at',
-               existing_type=sa.DateTime(),
-               type_=postgresql.TIMESTAMP(timezone=True),
-               existing_nullable=True,
-               existing_server_default=sa.text('now()'))
-    op.add_column('profiles', sa.Column('documents_data', postgresql.JSON(astext_type=sa.Text()), autoincrement=False, nullable=True))
-    op.add_column('profiles', sa.Column('passport_status', postgresql.ENUM('AVAILABLE', 'IN_PROGRESS', 'NOT_AVAILABLE', name='passportavailability'), autoincrement=False, nullable=True))
-    op.add_column('profiles', sa.Column('gpa', sa.DOUBLE_PRECISION(precision=53), autoincrement=False, nullable=True))
-    op.add_column('profiles', sa.Column('father_name', sa.VARCHAR(), autoincrement=False, nullable=True))
-    op.add_column('profiles', sa.Column('institution_name', sa.VARCHAR(), autoincrement=False, nullable=True))
-    op.add_column('profiles', sa.Column('degree', sa.VARCHAR(), autoincrement=False, nullable=True))
-    op.add_column('profiles', sa.Column('currency', sa.VARCHAR(), autoincrement=False, nullable=True))
-    op.add_column('profiles', sa.Column('country', sa.VARCHAR(), autoincrement=False, nullable=True))
-    op.add_column('profiles', sa.Column('marital_status', sa.VARCHAR(), autoincrement=False, nullable=True))
-    op.add_column('profiles', sa.Column('major', sa.VARCHAR(), autoincrement=False, nullable=True))
-    op.add_column('profiles', sa.Column('full_name', sa.VARCHAR(), autoincrement=False, nullable=True))
-    op.add_column('profiles', sa.Column('graduation_year', sa.INTEGER(), autoincrement=False, nullable=True))
-    op.add_column('profiles', sa.Column('date_of_birth', sa.DATE(), autoincrement=False, nullable=True))
-    op.add_column('profiles', sa.Column('mother_name', sa.VARCHAR(), autoincrement=False, nullable=True))
-    op.add_column('profiles', sa.Column('mother_income', sa.DOUBLE_PRECISION(precision=53), autoincrement=False, nullable=True))
-    op.add_column('profiles', sa.Column('father_income', sa.DOUBLE_PRECISION(precision=53), autoincrement=False, nullable=True))
-    op.add_column('profiles', sa.Column('country_of_birth', sa.VARCHAR(), autoincrement=False, nullable=True))
-    op.add_column('profiles', sa.Column('address', sa.TEXT(), autoincrement=False, nullable=True))
-    op.add_column('profiles', sa.Column('id_type', sa.VARCHAR(), autoincrement=False, nullable=True))
-    op.add_column('profiles', sa.Column('num_of_siblings', sa.INTEGER(), autoincrement=False, nullable=True))
-    op.drop_constraint(None, 'profiles', type_='foreignkey')
-    op.drop_index(op.f('ix_profiles_email'), table_name='profiles')
-    op.alter_column('profiles', 'current_study_language',
-               existing_type=sa.JSON(),
-               type_=postgresql.ARRAY(sa.VARCHAR()),
-               existing_nullable=True)
-    op.alter_column('profiles', 'gpa_scale',
-               existing_type=sa.Enum('SCALE_4', 'SCALE_5', 'SCALE_10', 'SCALE_100', name='gpascale'),
-               type_=sa.VARCHAR(),
-               nullable=True)
-    op.alter_column('profiles', 'gpa_value',
-               existing_type=sa.DOUBLE_PRECISION(precision=53),
-               nullable=True)
-    op.alter_column('profiles', 'institution',
-               existing_type=sa.VARCHAR(length=255),
-               nullable=True)
-    op.alter_column('profiles', 'field_of_study',
-               existing_type=postgresql.ENUM('ENGINEERING', 'COMPUTER_SCIENCE', 'MEDICINE', 'BUSINESS', 'ARTS', 'OTHER', name='fieldofstudy'),
-               nullable=True)
-    op.alter_column('profiles', 'academic_level',
-               existing_type=postgresql.ENUM('BACHELOR', 'MASTER', 'PHD', name='academiclevel'),
-               nullable=True)
-    op.alter_column('profiles', 'country_of_residence',
-               existing_type=sa.VARCHAR(),
-               nullable=True)
-    op.alter_column('profiles', 'nationality',
-               existing_type=sa.VARCHAR(),
-               nullable=True)
-    op.alter_column('profiles', 'gender',
-               existing_type=sa.Enum('MALE', 'FEMALE', name='gender'),
-               type_=sa.VARCHAR(),
-               nullable=True)
-    op.alter_column('profiles', 'birth_date',
-               existing_type=sa.DATE(),
-               nullable=True)
-    op.alter_column('profiles', 'email',
-               existing_type=sa.VARCHAR(),
-               nullable=True)
-    op.alter_column('profiles', 'last_name',
-               existing_type=sa.VARCHAR(length=50),
-               nullable=True)
-    op.alter_column('profiles', 'first_name',
-               existing_type=sa.VARCHAR(length=50),
-               nullable=True)
-    op.drop_column('profiles', 'updated_at')
-    op.drop_column('profiles', 'created_at')
-    op.drop_column('profiles', 'profile_completion_percentage')
-    op.drop_column('profiles', 'documents')
-    op.drop_column('profiles', 'passport_number')
-    op.add_column('experiences', sa.Column('documents_data', postgresql.JSON(astext_type=sa.Text()), autoincrement=False, nullable=True))
-    op.add_column('experiences', sa.Column('id_number', sa.VARCHAR(length=50), autoincrement=False, nullable=False))
-    op.add_column('experiences', sa.Column('gpa_scale', postgresql.ENUM('SCALE_4', 'SCALE_5', 'SCALE_10', 'SCALE_100', name='gpascale'), autoincrement=False, nullable=True))
-    op.add_column('experiences', sa.Column('skills_data', postgresql.JSON(astext_type=sa.Text()), autoincrement=False, nullable=True))
-    op.add_column('experiences', sa.Column('city', sa.VARCHAR(length=100), autoincrement=False, nullable=True))
-    op.add_column('experiences', sa.Column('gpa_value', sa.DOUBLE_PRECISION(precision=53), autoincrement=False, nullable=True))
-    op.add_column('experiences', sa.Column('preferred_fields_of_study', postgresql.JSON(astext_type=sa.Text()), autoincrement=False, nullable=True))
-    op.add_column('experiences', sa.Column('first_name', sa.VARCHAR(length=50), autoincrement=False, nullable=True))
-    op.add_column('experiences', sa.Column('current_study_language', postgresql.ARRAY(sa.VARCHAR()), autoincrement=False, nullable=True))
-    op.add_column('experiences', sa.Column('is_completed', sa.BOOLEAN(), autoincrement=False, nullable=True))
-    op.add_column('experiences', sa.Column('funding_type', postgresql.ENUM('FULL', 'PARTIAL', 'SELF', 'ANY', name='fundingtype'), autoincrement=False, nullable=True))
-    op.add_column('experiences', sa.Column('expected_graduation_year', sa.INTEGER(), autoincrement=False, nullable=True))
-    op.add_column('experiences', sa.Column('last_name', sa.VARCHAR(length=50), autoincrement=False, nullable=True))
-    op.add_column('experiences', sa.Column('phone_number', sa.VARCHAR(length=30), autoincrement=False, nullable=True))
-    op.add_column('experiences', sa.Column('languages_data', postgresql.JSON(astext_type=sa.Text()), autoincrement=False, nullable=True))
-    op.add_column('experiences', sa.Column('passport_number', sa.VARCHAR(length=50), autoincrement=False, nullable=False))
-    op.add_column('experiences', sa.Column('nationality', sa.VARCHAR(length=2), autoincrement=False, nullable=True))
-    op.add_column('experiences', sa.Column('birth_date', sa.DATE(), autoincrement=False, nullable=True))
-    op.add_column('experiences', sa.Column('institution', sa.VARCHAR(length=255), autoincrement=False, nullable=True))
-    op.add_column('experiences', sa.Column('financial_status', postgresql.ENUM('LIMITED', 'MODERATE', 'STABLE', name='financialstatus'), autoincrement=False, nullable=True))
-    op.add_column('experiences', sa.Column('field_of_study', postgresql.ENUM('ENGINEERING', 'COMPUTER_SCIENCE', 'MEDICINE', 'BUSINESS', 'ARTS', 'OTHER', name='fieldofstudy'), autoincrement=False, nullable=True))
-    op.add_column('experiences', sa.Column('desired_degree_level', postgresql.ENUM('BACHELOR', 'MASTER', 'PHD', 'DIPLOMA', 'OTHER', name='desireddegreelevel'), autoincrement=False, nullable=True))
-    op.add_column('experiences', sa.Column('country_of_residence', sa.VARCHAR(length=2), autoincrement=False, nullable=True))
-    op.add_column('experiences', sa.Column('academic_level', postgresql.ENUM('BACHELOR', 'MASTER', 'PHD', name='academiclevel'), autoincrement=False, nullable=True))
-    op.add_column('experiences', sa.Column('gender', postgresql.ENUM('MALE', 'FEMALE', name='gender'), autoincrement=False, nullable=True))
-    op.add_column('experiences', sa.Column('preferred_countries', postgresql.JSON(astext_type=sa.Text()), autoincrement=False, nullable=True))
-    op.create_table('work_experiences',
-    sa.Column('id', sa.INTEGER(), autoincrement=True, nullable=False),
-    sa.Column('profile_id', sa.INTEGER(), autoincrement=False, nullable=False),
-    sa.Column('company_name', sa.VARCHAR(), autoincrement=False, nullable=False),
-    sa.Column('role_title', sa.VARCHAR(), autoincrement=False, nullable=True),
-    sa.Column('employment_type', sa.VARCHAR(), autoincrement=False, nullable=True),
-    sa.Column('location', sa.VARCHAR(), autoincrement=False, nullable=True),
-    sa.Column('start_date', sa.DATE(), autoincrement=False, nullable=True),
-    sa.Column('end_date', sa.DATE(), autoincrement=False, nullable=True),
-    sa.Column('is_current', sa.BOOLEAN(), autoincrement=False, nullable=True),
-    sa.ForeignKeyConstraint(['profile_id'], ['profiles.id'], name=op.f('work_experiences_profile_id_fkey'), ondelete='CASCADE'),
-    sa.PrimaryKeyConstraint('id', name=op.f('work_experiences_pkey'))
-    )
-    op.create_index(op.f('ix_work_experiences_id'), 'work_experiences', ['id'], unique=False)
-    op.create_table('language_details',
-    sa.Column('id', sa.INTEGER(), autoincrement=True, nullable=False),
-    sa.Column('profile_id', sa.INTEGER(), autoincrement=False, nullable=False),
-    sa.Column('language_name', sa.VARCHAR(), autoincrement=False, nullable=False),
-    sa.Column('proficiency_level', sa.VARCHAR(), autoincrement=False, nullable=True),
-    sa.Column('certificate_url', sa.VARCHAR(), autoincrement=False, nullable=True),
-    sa.ForeignKeyConstraint(['profile_id'], ['profiles.id'], name=op.f('language_details_profile_id_fkey'), ondelete='CASCADE'),
-    sa.PrimaryKeyConstraint('id', name=op.f('language_details_pkey'))
-    )
-    op.create_index(op.f('ix_language_details_id'), 'language_details', ['id'], unique=False)
-    op.drop_index('ix_scholarships_status', table_name='scholarships')
-    op.drop_index('ix_scholarships_source', table_name='scholarships')
-    op.drop_index(op.f('ix_scholarships_id'), table_name='scholarships')
-    op.drop_index('ix_scholarships_deadline', table_name='scholarships')
-    op.drop_index('ix_scholarships_country', table_name='scholarships')
-    op.drop_table('scholarships')
-    # ### end Alembic commands ###
+    populated = [name for name in ("experiences", "profiles") if _row_count(name)]
+    if populated:
+        names = ", ".join(populated)
+        raise RuntimeError(
+            "Profile-v2 downgrade stopped to protect current data in: " + names
+        )
+
+    if _has_table("experiences"):
+        op.drop_table("experiences")
+    if _has_table("profiles"):
+        op.drop_table("profiles")
