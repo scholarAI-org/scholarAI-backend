@@ -117,6 +117,9 @@ class EmailVerificationFlowTests(unittest.TestCase):
         self.assertFalse(user.is_email_verified)
         self.assertNotEqual(user.email_verification_otp_hash, otp)
         self.assertGreater(user.email_verification_otp_expires_at, self.utc_now_naive())
+        with self.Session() as db:
+            profile = db.query(Profile).filter(Profile.user_id == user.id).one()
+            self.assertEqual(profile.user_id, user.id)
 
     def test_unverified_user_cannot_login_then_can_login_after_verification(self):
         self.register()

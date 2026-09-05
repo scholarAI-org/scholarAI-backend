@@ -1,10 +1,8 @@
 import re
-
 import resend
 from resend.exceptions import ResendError
 
 from app.core.config import settings
-
 
 class EmailDeliveryError(RuntimeError):
     """A provider-safe mail error that never contains the API key or recipient."""

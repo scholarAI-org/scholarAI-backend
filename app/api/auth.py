@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.user import User
+from app.models.profile import Profile
 from app.schemas.user import (
     UserCreate, UserLogin, Token,
     ForgotPasswordRequest, ResetPasswordRequest, ChangePasswordRequest,
@@ -115,7 +116,19 @@ def _issue_and_send_verification_otp(
         ) from exc
 
 @router.post(
-    '/register', response_model=MessageResponse, status_code=status.HTTP_201_CREATED
+    '/register',
+    response_model=MessageResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary='Register a new user',
+    description=(
+        'Creates an unverified user and sends a verification OTP. '
+        'Fields: `full_name`, `email`, `password`; `role` is optional.'
+    ),
+    responses={
+        400: {"description": "Email already registered"},
+        422: {"description": "Validation error"},
+        503: {"description": "Database or email delivery unavailable"},
+    },
 )
 def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
     existing_user = (
@@ -158,6 +171,10 @@ def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
     try:
         db.add(new_user)
         db.flush()
+
+        # Create the profile in the same transaction as the user and OTP state.
+        new_profile = Profile(user_id=new_user.id)
+        db.add(new_profile)
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(
@@ -185,7 +202,20 @@ def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
     }
 
 
-@router.post('/login', response_model=Token)
+@router.post(
+    '/login',
+    response_model=Token,
+    summary='Login',
+    description=(
+        'JSON body with `email` and `password`. '
+        'The email must be verified before login.'
+    ),
+    responses={
+        401: {"description": "Invalid email or password"},
+        403: {"description": "Email verification required"},
+        422: {"description": "Validation error"},
+    },
+)
 def login_user(
     user_data: UserLogin,
     db: Session = Depends(get_db)
