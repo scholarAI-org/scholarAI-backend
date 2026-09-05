@@ -54,14 +54,17 @@ class EmailVerificationFlowTests(unittest.TestCase):
         app.dependency_overrides[get_db] = override_get_db
         cls.client = TestClient(app)
         cls.original_email_sender = auth_api.send_verification_otp_email
+        cls.original_email_verification_enabled = settings.EMAIL_VERIFICATION_ENABLED
 
     @classmethod
     def tearDownClass(cls):
         auth_api.send_verification_otp_email = cls.original_email_sender
+        settings.EMAIL_VERIFICATION_ENABLED = cls.original_email_verification_enabled
         app.dependency_overrides.clear()
         cls.engine.dispose()
 
     def setUp(self):
+        settings.EMAIL_VERIFICATION_ENABLED = True
         Profile.__table__.drop(self.engine, checkfirst=True)
         User.__table__.drop(self.engine, checkfirst=True)
         User.__table__.create(self.engine)
@@ -120,6 +123,26 @@ class EmailVerificationFlowTests(unittest.TestCase):
         with self.Session() as db:
             profile = db.query(Profile).filter(Profile.user_id == user.id).one()
             self.assertEqual(profile.user_id, user.id)
+
+    def test_registration_and_login_skip_otp_when_verification_is_disabled(self):
+        settings.EMAIL_VERIFICATION_ENABLED = False
+
+        response = self.register()
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json(), {"message": "Registration successful."})
+        self.assertEqual(self.mailbox, [])
+
+        user = self.get_user()
+        self.assertTrue(user.is_email_verified)
+        self.assertIsNone(user.email_verification_otp_hash)
+
+        login = self.client.post(
+            "/auth/login",
+            json={"email": "user@example.com", "password": "Pass123!"},
+        )
+        self.assertEqual(login.status_code, 200)
+        self.assertIn("access_token", login.json())
 
     def test_unverified_user_cannot_login_then_can_login_after_verification(self):
         self.register()

@@ -138,7 +138,10 @@ def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
         .first()
     )
     if existing_user:
-        if existing_user.is_email_verified:
+        if (
+            existing_user.is_email_verified
+            or not settings.EMAIL_VERIFICATION_ENABLED
+        ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Email already registered",
@@ -166,7 +169,7 @@ def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
         email=user_data.email,
         hashed_password=hashed_pwd,
         role=user_data.role if user_data.role else "student",
-        is_email_verified=False,
+        is_email_verified=not settings.EMAIL_VERIFICATION_ENABLED,
     )
     try:
         db.add(new_user)
@@ -187,6 +190,17 @@ def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="تعذر إنشاء الحساب بسبب خطأ في قاعدة البيانات",
         ) from exc
+    if not settings.EMAIL_VERIFICATION_ENABLED:
+        try:
+            db.commit()
+        except SQLAlchemyError as exc:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Could not create the account due to a database error",
+            ) from exc
+        return {"message": "Registration successful."}
+
     _issue_and_send_verification_otp(
         new_user,
         db,
@@ -235,7 +249,7 @@ def login_user(
             detail='البريد الإلكتروني أو كلمة المرور غير صحيحة'
         )
     
-    if not user.is_email_verified:
+    if settings.EMAIL_VERIFICATION_ENABLED and not user.is_email_verified:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Email verification required",
