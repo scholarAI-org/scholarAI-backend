@@ -24,8 +24,6 @@ class ScholarshipBase(BaseModel):
     image_url: Optional[str] = None
 
     description_html: Optional[str] = None
-    benefits_html: Optional[str] = None
-    qualifications_html: Optional[str] = None
 
     apply_link: Optional[str] = None
     apply_email: Optional[str] = None

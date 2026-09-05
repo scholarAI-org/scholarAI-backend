@@ -61,8 +61,6 @@ class Scholarship(Base):
 
     # Full details
     description_html = Column(Text, nullable=True, comment="Full description HTML from the source.")
-    benefits_html = Column(Text, nullable=True, comment="Benefits / funding HTML.")
-    qualifications_html = Column(Text, nullable=True, comment="Eligibility / qualifications HTML.")
 
     # Application info
     apply_link = Column(Text, nullable=True, comment="External application URL.")
