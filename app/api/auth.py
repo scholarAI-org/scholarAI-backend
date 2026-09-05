@@ -389,3 +389,17 @@ def change_password(
     current_user.hashed_password = hash_password(data.new_password)
     db.commit()
     return {'message': 'تم تغيير كلمة المرور بنجاح!'}
+
+
+@router.post(
+    '/logout',
+    response_model=MessageResponse,
+    summary='Logout (authenticated)',
+    description='Logs out the current authenticated user.',
+    responses={
+        401: {"description": "Missing or invalid Bearer token"},
+    },
+)
+def logout_user(current_user: User = Depends(get_current_user)):
+    return {'message': 'تم تسجيل الخروج بنجاح!'}
+

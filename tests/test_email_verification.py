@@ -352,6 +352,20 @@ class EmailVerificationFlowTests(unittest.TestCase):
         )
         self.assertEqual(final_login.status_code, 200)
 
+    def test_logout_success(self):
+        token = self.register_and_verify()
+        response = self.client.post(
+            "/auth/logout",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"message": "تم تسجيل الخروج بنجاح!"})
+
+    def test_logout_unauthorized_without_token(self):
+        response = self.client.post("/auth/logout")
+        self.assertEqual(response.status_code, 401)
+
+
     def test_email_failure_keeps_account_recoverable(self):
         def fail_to_send(_email: str, _otp: str):
             raise RuntimeError("mail service unavailable")
