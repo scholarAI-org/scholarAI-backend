@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
 import uuid
@@ -19,7 +20,7 @@ from app.models.document_upload import (
 from app.models.profile import Profile
 from app.models.user import User
 from app.schemas.documents import ProfileDocumentType
-from app.schemas.profile import Documents, UploadedFile, UploadStatus
+from app.schemas.profile import Documents, UploadStatus
 from app.services.s3 import StorageClient
 
 # HeadObject checks stored object metadata only, not file bytes.
@@ -131,20 +132,46 @@ def validate_upload_intent(
     return sanitize_file_name(file_name), extension, normalized_type
 
 
-def _empty_documents() -> dict[str, Any]:
-    empty = UploadedFile().model_dump(mode="json")
+def _json_clone(value: Any) -> Any:
+    """Return a detached copy so JSON column assignment is always a new object."""
+    return json.loads(json.dumps(value, default=str))
+
+
+def _empty_slot(document_type: str) -> dict[str, Any]:
     return {
-        "cv": {**empty, "document_type": "cv"},
-        "transcript": {**empty, "document_type": "transcript"},
-        "graduation_certificate": {**empty, "document_type": "graduation_certificate"},
-        "passport": {**empty, "document_type": "passport"},
-        "english_test": {**empty, "document_type": "english_test"},
+        "id": None,
+        "document_type": document_type,
+        "status": UploadStatus.NOT_UPLOADED.value,
+        "file_name": None,
+        "content_type": None,
+        "file_size": None,
+        "uploaded_at": None,
+    }
+
+
+def _empty_documents() -> dict[str, Any]:
+    return {
+        "cv": _empty_slot("cv"),
+        "transcript": _empty_slot("transcript"),
+        "graduation_certificate": _empty_slot("graduation_certificate"),
+        "passport": _empty_slot("passport"),
+        "english_test": _empty_slot("english_test"),
         "recommendation_letters": [],
     }
 
 
+def save_documents(db: Session, profile: Profile, documents: dict[str, Any]) -> None:
+    # JSON columns are not MutableDict/JSONB. Assign a brand-new object so
+    # SQLAlchemy emits UPDATE; in-place nested edits are not detected.
+    profile.documents_data = _json_clone(documents)
+    flag_modified(profile, "documents_data")
+    db.add(profile)
+    db.commit()
+    db.refresh(profile)
+
+
 def load_documents_dict(profile: Optional[Profile]) -> dict[str, Any]:
-    stored = dict(profile.documents_data or {}) if profile else {}
+    stored = _json_clone(profile.documents_data or {}) if profile else {}
     base = _empty_documents()
     for key in (
         "cv",
@@ -388,11 +415,8 @@ def confirm_upload_session(
             )
 
     data, record, previous_key = persist_confirmed_document(data, session)
-    profile.documents_data = data
-    flag_modified(profile, "documents_data")
     session.status = DocumentUploadSessionStatus.CONFIRMED.value
-    db.commit()
-    db.refresh(profile)
+    save_documents(db, profile, data)
 
     if previous_key and previous_key != session.object_key:
         try:
@@ -436,8 +460,11 @@ def delete_document(
     document_id: str,
 ) -> None:
     profile = db.query(Profile).filter(Profile.user_id == user.id).first()
-    data = load_documents_dict(profile)
-    found = find_document(data, document_id)
+    if profile is None:
+        return
+
+    documents = load_documents_dict(profile)
+    found = find_document(documents, document_id)
     if found is None:
         return
 
@@ -453,19 +480,12 @@ def delete_document(
             ) from exc
 
     if is_list:
-        letters = [
-            letter
-            for letter in (data.get("recommendation_letters") or [])
-            if letter.get("id") != document_id
+        letters = list(documents.get("recommendation_letters") or [])
+        documents["recommendation_letters"] = [
+            letter for letter in letters if letter.get("id") != document_id
         ]
-        data["recommendation_letters"] = letters
     else:
-        empty = UploadedFile().model_dump(mode="json")
-        empty["document_type"] = slot
-        data[slot] = empty
+        documents[slot] = _empty_slot(slot)
 
-    if profile is not None:
-        profile.documents_data = data
-        flag_modified(profile, "documents_data")
-        db.commit()
+    save_documents(db, profile, documents)
 

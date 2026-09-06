@@ -369,6 +369,96 @@ class DocumentUploadTests(unittest.TestCase):
         missing_object = self.client.delete(f"/profile/documents/{document_id}")
         self.assertEqual(missing_object.status_code, 204)
 
+        with self.Session() as db:
+            stored = db.query(Profile).filter_by(user_id=self.owner_id).one()
+            self.assertEqual(stored.documents_data["cv"]["status"], "NOT_UPLOADED")
+
+    def test_delete_persists_empty_cv_on_fresh_db_query(self):
+        document_id = "cv-doc-1"
+        object_key = f"users/{self.owner_id}/documents/cv/{document_id}.pdf"
+        with self.Session() as db:
+            profile = db.query(Profile).filter_by(user_id=self.owner_id).one()
+            profile.documents_data = {
+                "cv": {
+                    "id": document_id,
+                    "document_type": "cv",
+                    "object_key": object_key,
+                    "file_name": "cv.pdf",
+                    "content_type": "application/pdf",
+                    "file_size": 12,
+                    "status": "UPLOADED",
+                    "uploaded_at": "2026-09-06T10:00:00+00:00",
+                }
+            }
+            db.add(profile)
+            db.commit()
+        self.s3.put(object_key, "application/pdf", 12)
+
+        response = self.client.delete(f"/profile/documents/{document_id}")
+        self.assertEqual(response.status_code, 204)
+
+        with self.Session() as db:
+            reloaded = db.query(Profile).filter_by(user_id=self.owner_id).one()
+            cv = reloaded.documents_data["cv"]
+            self.assertEqual(cv["status"], "NOT_UPLOADED")
+            self.assertIsNone(cv.get("id"))
+            self.assertIsNone(cv.get("file_name"))
+            self.assertNotIn("object_key", cv)
+            self.assertNotEqual(cv.get("object_key"), object_key)
+
+        profile = self.client.get("/profile").json()
+        self.assertEqual(profile["documents"]["cv"]["status"], "NOT_UPLOADED")
+        self.assertIsNone(profile["documents"]["cv"]["id"])
+
+    def test_delete_persists_recommendation_letter_removal_on_fresh_db_query(self):
+        keep_id = "letter-keep"
+        drop_id = "letter-drop"
+        keep_key = f"users/{self.owner_id}/documents/recommendation_letter/{keep_id}.pdf"
+        drop_key = f"users/{self.owner_id}/documents/recommendation_letter/{drop_id}.pdf"
+        with self.Session() as db:
+            profile = db.query(Profile).filter_by(user_id=self.owner_id).one()
+            profile.documents_data = {
+                "recommendation_letters": [
+                    {
+                        "id": keep_id,
+                        "document_type": "recommendation_letter",
+                        "object_key": keep_key,
+                        "file_name": "keep.pdf",
+                        "content_type": "application/pdf",
+                        "file_size": 10,
+                        "status": "UPLOADED",
+                    },
+                    {
+                        "id": drop_id,
+                        "document_type": "recommendation_letter",
+                        "object_key": drop_key,
+                        "file_name": "drop.pdf",
+                        "content_type": "application/pdf",
+                        "file_size": 11,
+                        "status": "UPLOADED",
+                    },
+                ]
+            }
+            db.add(profile)
+            db.commit()
+        self.s3.put(keep_key, "application/pdf", 10)
+        self.s3.put(drop_key, "application/pdf", 11)
+
+        response = self.client.delete(f"/profile/documents/{drop_id}")
+        self.assertEqual(response.status_code, 204)
+
+        with self.Session() as db:
+            reloaded = db.query(Profile).filter_by(user_id=self.owner_id).one()
+            letters = reloaded.documents_data["recommendation_letters"]
+            self.assertEqual([letter["id"] for letter in letters], [keep_id])
+            self.assertEqual(letters[0]["object_key"], keep_key)
+
+        profile = self.client.get("/profile").json()
+        letters = profile["documents"]["recommendation_letters"]
+        self.assertEqual(len(letters), 1)
+        self.assertEqual(letters[0]["id"], keep_id)
+        self.assertEqual(letters[0]["status"], "UPLOADED")
+
     def test_legacy_client_cannot_write_storage_references(self):
         put_legacy = self.client.put(
             "/profile/documents",
