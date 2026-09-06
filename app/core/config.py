@@ -26,9 +26,7 @@ class Settings(BaseSettings):
 
     RESEND_API_KEY: Optional[str] = None
 
-    # Keep verification enabled unless a test environment explicitly disables it.
-    EMAIL_VERIFICATION_ENABLED: bool = True
-
+    EMAIL_VERIFICATION_ENABLED: bool = False
     EMAIL_VERIFICATION_OTP_EXPIRE_MINUTES: int = 10
     EMAIL_VERIFICATION_OTP_RESEND_COOLDOWN_SECONDS: int = 60
 

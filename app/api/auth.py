@@ -153,7 +153,10 @@ def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
         .first()
     )
     if existing_user:
-        if existing_user.is_email_verified:
+        if (
+            existing_user.is_email_verified
+            or not settings.EMAIL_VERIFICATION_ENABLED
+        ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Email already registered",
@@ -208,12 +211,16 @@ def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="تعذر إنشاء الحساب بسبب خطأ في قاعدة البيانات",
         ) from exc
-
     if not settings.EMAIL_VERIFICATION_ENABLED:
-        _complete_registration_without_verification(new_user, db)
-        return {
-            "message": "Registration successful. Email verification is disabled."
-        }
+        try:
+            db.commit()
+        except SQLAlchemyError as exc:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Could not create the account due to a database error",
+            ) from exc
+        return {"message": "Registration successful."}
 
     _issue_and_send_verification_otp(
         new_user,
@@ -417,3 +424,17 @@ def change_password(
     current_user.hashed_password = hash_password(data.new_password)
     db.commit()
     return {'message': 'تم تغيير كلمة المرور بنجاح!'}
+
+
+@router.post(
+    '/logout',
+    response_model=MessageResponse,
+    summary='Logout (authenticated)',
+    description='Logs out the current authenticated user.',
+    responses={
+        401: {"description": "Missing or invalid Bearer token"},
+    },
+)
+def logout_user(current_user: User = Depends(get_current_user)):
+    return {'message': 'تم تسجيل الخروج بنجاح!'}
+

@@ -25,7 +25,7 @@ app = FastAPI(
     openapi_tags=[
         {
             "name": "Authentication",
-            "description": "Register, login, and password reset. Send JSON, not form data.",
+            "description": "Register, login, logout, and password reset. Send JSON, not form data.",
         },
         {
             "name": "Profile",

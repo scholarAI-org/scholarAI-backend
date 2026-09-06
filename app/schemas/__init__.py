@@ -16,4 +16,5 @@ from app.schemas.Scholarship import (
     ScholarshipCreate,
     ScholarshipResponse,
     ScholarshipExistsResponse,
+    ScholarshipStatusDistribution,
 )

@@ -72,6 +72,12 @@ class ScholarshipResponse(ScholarshipBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ScholarshipStatusDistribution(BaseModel):
+    published: int = 0
+    pending: int = 0
+    rejected: int = 0
+
+
 class ScholarshipExistsResponse(BaseModel):
     exists: bool
     scholarship_id: Optional[int] = None

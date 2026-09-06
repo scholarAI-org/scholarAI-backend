@@ -54,14 +54,17 @@ class EmailVerificationFlowTests(unittest.TestCase):
         app.dependency_overrides[get_db] = override_get_db
         cls.client = TestClient(app)
         cls.original_email_sender = auth_api.send_verification_otp_email
+        cls.original_email_verification_enabled = settings.EMAIL_VERIFICATION_ENABLED
 
     @classmethod
     def tearDownClass(cls):
         auth_api.send_verification_otp_email = cls.original_email_sender
+        settings.EMAIL_VERIFICATION_ENABLED = cls.original_email_verification_enabled
         app.dependency_overrides.clear()
         cls.engine.dispose()
 
     def setUp(self):
+        settings.EMAIL_VERIFICATION_ENABLED = True
         Profile.__table__.drop(self.engine, checkfirst=True)
         User.__table__.drop(self.engine, checkfirst=True)
         User.__table__.create(self.engine)
@@ -122,13 +125,15 @@ class EmailVerificationFlowTests(unittest.TestCase):
             profile = db.query(Profile).filter(Profile.user_id == user.id).one()
             self.assertEqual(profile.user_id, user.id)
 
-    def test_verification_can_be_disabled_for_temporary_testing(self):
+    def test_registration_and_login_skip_otp_when_verification_is_disabled(self):
         settings.EMAIL_VERIFICATION_ENABLED = False
 
         response = self.register()
 
         self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json(), {"message": "Registration successful."})
         self.assertEqual(self.mailbox, [])
+
         user = self.get_user()
         self.assertTrue(user.is_email_verified)
         self.assertIsNone(user.email_verification_otp_hash)
@@ -370,6 +375,20 @@ class EmailVerificationFlowTests(unittest.TestCase):
             json={"email": "user@example.com", "password": "Changed123!"},
         )
         self.assertEqual(final_login.status_code, 200)
+
+    def test_logout_success(self):
+        token = self.register_and_verify()
+        response = self.client.post(
+            "/auth/logout",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"message": "تم تسجيل الخروج بنجاح!"})
+
+    def test_logout_unauthorized_without_token(self):
+        response = self.client.post("/auth/logout")
+        self.assertEqual(response.status_code, 401)
+
 
     def test_email_failure_keeps_account_recoverable(self):
         def fail_to_send(_email: str, _otp: str):
