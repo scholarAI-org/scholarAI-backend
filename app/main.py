@@ -49,7 +49,8 @@ origins = [
     "http://127.0.0.1:5500",
     "http://localhost:8000",
     "http://127.0.0.1:8000",
-    "https://scholar-ai-neon.vercel.app/"
+    "https://scholar-ai-neon.vercel.app",
+     "https://scholar-636fa2nsy-zenatyahgmailcoms-projects.vercel.app",
 ]
 frontend_url = os.getenv("FRONTEND_URL")
 if frontend_url:
