@@ -391,6 +391,19 @@ class DocumentUploadTests(unittest.TestCase):
                 }
             }
             db.add(profile)
+            db.add(
+                DocumentUploadSession(
+                    id="session-cv-1",
+                    user_id=self.owner_id,
+                    document_type="cv",
+                    object_key=object_key,
+                    original_file_name="cv.pdf",
+                    expected_content_type="application/pdf",
+                    expected_file_size=12,
+                    status=DocumentUploadSessionStatus.CONFIRMED.value,
+                    expires_at=datetime.now(timezone.utc),
+                )
+            )
             db.commit()
         self.s3.put(object_key, "application/pdf", 12)
 
@@ -404,7 +417,17 @@ class DocumentUploadTests(unittest.TestCase):
             self.assertIsNone(cv.get("id"))
             self.assertIsNone(cv.get("file_name"))
             self.assertNotIn("object_key", cv)
-            self.assertNotEqual(cv.get("object_key"), object_key)
+            raw = db.execute(
+                Profile.__table__.select().where(
+                    Profile.__table__.c.user_id == self.owner_id
+                )
+            ).mappings().one()["documents"]
+            self.assertEqual(raw["cv"]["status"], "NOT_UPLOADED")
+            self.assertFalse(
+                db.query(DocumentUploadSession)
+                .filter_by(object_key=object_key)
+                .count()
+            )
 
         profile = self.client.get("/profile").json()
         self.assertEqual(profile["documents"]["cv"]["status"], "NOT_UPLOADED")

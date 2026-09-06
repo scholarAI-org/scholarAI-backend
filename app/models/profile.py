@@ -120,6 +120,7 @@ class Profile(Base):
 
     # Documents (JSON Object matching Documents schema)
     # NOTE: named 'documents_data' to match API/service layer references.
+    # Plain JSON is not MutableDict; writes must assign a new object or use UPDATE.
     documents_data = Column("documents", JSON, default=dict)
 
     # Skills and Languages (JSON Object matching SkillsAndLanguages schema)
