@@ -115,6 +115,21 @@ def _issue_and_send_verification_otp(
             detail=delivery_error_detail,
         ) from exc
 
+
+def _complete_registration_without_verification(user: User, db: Session) -> None:
+    user.is_email_verified = True
+    clear_verification_otp(user)
+    try:
+        db.commit()
+        db.refresh(user)
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Could not create the account due to a database error",
+        ) from exc
+
+
 @router.post(
     '/register',
     response_model=MessageResponse,
@@ -144,6 +159,12 @@ def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
                 detail="Email already registered",
             )
 
+        if not settings.EMAIL_VERIFICATION_ENABLED:
+            _complete_registration_without_verification(existing_user, db)
+            return {
+                "message": "Registration successful. Email verification is disabled."
+            }
+
         _raise_if_otp_cooldown_active(existing_user, utc_now_naive())
         _issue_and_send_verification_otp(
             existing_user,
@@ -166,7 +187,7 @@ def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
         email=user_data.email,
         hashed_password=hashed_pwd,
         role=user_data.role if user_data.role else "student",
-        is_email_verified=False,
+        is_email_verified=not settings.EMAIL_VERIFICATION_ENABLED,
     )
     try:
         db.add(new_user)
@@ -187,6 +208,13 @@ def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="تعذر إنشاء الحساب بسبب خطأ في قاعدة البيانات",
         ) from exc
+
+    if not settings.EMAIL_VERIFICATION_ENABLED:
+        _complete_registration_without_verification(new_user, db)
+        return {
+            "message": "Registration successful. Email verification is disabled."
+        }
+
     _issue_and_send_verification_otp(
         new_user,
         db,
@@ -235,7 +263,7 @@ def login_user(
             detail='البريد الإلكتروني أو كلمة المرور غير صحيحة'
         )
     
-    if not user.is_email_verified:
+    if settings.EMAIL_VERIFICATION_ENABLED and not user.is_email_verified:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Email verification required",

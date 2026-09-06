@@ -26,6 +26,22 @@ class Settings(BaseSettings):
 
     RESEND_API_KEY: Optional[str] = None
 
+    # Keep verification enabled unless a test environment explicitly disables it.
+    EMAIL_VERIFICATION_ENABLED: bool = True
+
     EMAIL_VERIFICATION_OTP_EXPIRE_MINUTES: int = 10
     EMAIL_VERIFICATION_OTP_RESEND_COOLDOWN_SECONDS: int = 60
+
+    # Object storage (private S3-compatible bucket)
+    AWS_REGION: str = "us-east-1"
+    AWS_ACCESS_KEY_ID: Optional[str] = None
+    AWS_SECRET_ACCESS_KEY: Optional[str] = None
+    AWS_S3_BUCKET: str = "scholarai-documents"
+    AWS_S3_ENDPOINT_URL: Optional[str] = None
+    S3_PRESIGN_PUT_EXPIRE_SECONDS: int = 300
+    S3_PRESIGN_GET_EXPIRE_SECONDS: int = 120
+    S3_MAX_FILE_BYTES: int = 10 * 1024 * 1024
+    S3_MAX_RECOMMENDATION_LETTERS: int = 3
+
+
 settings = Settings()

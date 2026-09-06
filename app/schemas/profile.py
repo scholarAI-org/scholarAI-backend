@@ -2,6 +2,7 @@ from datetime import date, datetime
 from enum import Enum
 from typing import Dict, List, Optional
 from pydantic import (
+    AliasChoices,
     BaseModel,
     ConfigDict,
     EmailStr,
@@ -189,12 +190,21 @@ class AcademicInfoUpdate(BaseModel):
 
 
 class UploadedFile(BaseModel):
+    """Stable document metadata. object_key is loaded from storage but never serialized."""
+
+    model_config = ConfigDict(from_attributes=True, extra="ignore")
+
+    id: Optional[str] = None
+    document_type: Optional[str] = None
     status: UploadStatus = UploadStatus.NOT_UPLOADED
-    file_url: Optional[str] = None
     file_name: Optional[str] = None
-    file_type: Optional[str] = None
+    content_type: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("content_type", "file_type"),
+    )
     file_size: Optional[int] = None
     uploaded_at: Optional[datetime] = None
+    object_key: Optional[str] = Field(default=None, exclude=True)
 
 
 class Documents(BaseModel):

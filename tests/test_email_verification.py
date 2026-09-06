@@ -70,6 +70,7 @@ class EmailVerificationFlowTests(unittest.TestCase):
         auth_api.send_verification_otp_email = (
             lambda email, otp: self.mailbox.append((email, otp))
         )
+        settings.EMAIL_VERIFICATION_ENABLED = True
 
     def register(self, email: str = "user@example.com"):
         return self.client.post(
@@ -120,6 +121,24 @@ class EmailVerificationFlowTests(unittest.TestCase):
         with self.Session() as db:
             profile = db.query(Profile).filter(Profile.user_id == user.id).one()
             self.assertEqual(profile.user_id, user.id)
+
+    def test_verification_can_be_disabled_for_temporary_testing(self):
+        settings.EMAIL_VERIFICATION_ENABLED = False
+
+        response = self.register()
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(self.mailbox, [])
+        user = self.get_user()
+        self.assertTrue(user.is_email_verified)
+        self.assertIsNone(user.email_verification_otp_hash)
+
+        login = self.client.post(
+            "/auth/login",
+            json={"email": "user@example.com", "password": "Pass123!"},
+        )
+        self.assertEqual(login.status_code, 200)
+        self.assertIn("access_token", login.json())
 
     def test_unverified_user_cannot_login_then_can_login_after_verification(self):
         self.register()
