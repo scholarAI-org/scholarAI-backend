@@ -73,6 +73,7 @@ class EmailVerificationFlowTests(unittest.TestCase):
         auth_api.send_verification_otp_email = (
             lambda email, otp: self.mailbox.append((email, otp))
         )
+        settings.EMAIL_VERIFICATION_ENABLED = True
 
     def register(self, email: str = "user@example.com"):
         return self.client.post(

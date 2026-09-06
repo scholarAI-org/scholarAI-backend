@@ -115,6 +115,21 @@ def _issue_and_send_verification_otp(
             detail=delivery_error_detail,
         ) from exc
 
+
+def _complete_registration_without_verification(user: User, db: Session) -> None:
+    user.is_email_verified = True
+    clear_verification_otp(user)
+    try:
+        db.commit()
+        db.refresh(user)
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Could not create the account due to a database error",
+        ) from exc
+
+
 @router.post(
     '/register',
     response_model=MessageResponse,
@@ -146,6 +161,12 @@ def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Email already registered",
             )
+
+        if not settings.EMAIL_VERIFICATION_ENABLED:
+            _complete_registration_without_verification(existing_user, db)
+            return {
+                "message": "Registration successful. Email verification is disabled."
+            }
 
         _raise_if_otp_cooldown_active(existing_user, utc_now_naive())
         _issue_and_send_verification_otp(

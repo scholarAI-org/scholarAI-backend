@@ -1,0 +1,396 @@
+import os
+import unittest
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+
+os.environ["DATABASE_URL"] = "sqlite://"
+os.environ.setdefault("SECRET_KEY", "document-upload-test-key")
+os.environ.setdefault("AWS_S3_BUCKET", "test-bucket")
+
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from app.api.profile import router
+from app.core.config import settings
+from app.core.database import get_db
+from app.core.security import get_current_user
+from app.models.document_upload import (
+    DocumentUploadSession,
+    DocumentUploadSessionStatus,
+)
+from app.models.profile import Experience, Profile
+from app.models.user import User
+from app.services.s3 import ObjectHead, generate_object_key, get_s3_storage
+
+
+class FakeS3:
+    def __init__(self):
+        self.objects = {}
+        self.deleted = []
+        self.last_get_expires = None
+
+    def generate_object_key(self, user_id, document_type, extension):
+        return generate_object_key(user_id, document_type, extension)
+
+    def presign_put(self, object_key, content_type, expires_in):
+        return f"https://s3.test/put/{object_key}"
+
+    def presign_get(self, object_key, expires_in):
+        self.last_get_expires = expires_in
+        return f"https://s3.test/get/{object_key}?exp={expires_in}"
+
+    def head_object(self, object_key):
+        obj = self.objects.get(object_key)
+        if not obj:
+            return ObjectHead(exists=False)
+        return ObjectHead(
+            exists=True,
+            content_type=obj["content_type"],
+            content_length=obj["content_length"],
+        )
+
+    def delete_object(self, object_key):
+        self.deleted.append(object_key)
+        self.objects.pop(object_key, None)
+
+    def put(self, object_key, content_type, size):
+        self.objects[object_key] = {
+            "content_type": content_type,
+            "content_length": size,
+        }
+
+
+class DocumentUploadTests(unittest.TestCase):
+    def setUp(self):
+        self.engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        self.Session = sessionmaker(
+            bind=self.engine,
+            autocommit=False,
+            autoflush=False,
+            expire_on_commit=False,
+        )
+        User.__table__.create(self.engine)
+        Profile.__table__.create(self.engine)
+        Experience.__table__.create(self.engine)
+        DocumentUploadSession.__table__.create(self.engine)
+
+        with self.Session() as db:
+            owner = User(
+                full_name="Owner",
+                email="owner@example.com",
+                hashed_password="x",
+                is_email_verified=True,
+            )
+            other = User(
+                full_name="Other",
+                email="other@example.com",
+                hashed_password="x",
+                is_email_verified=True,
+            )
+            db.add_all([owner, other])
+            db.flush()
+            db.add_all(
+                [
+                    Profile(user_id=owner.id),
+                    Profile(user_id=other.id),
+                ]
+            )
+            db.commit()
+            self.owner_id = owner.id
+            self.other_id = other.id
+
+        self.owner = SimpleNamespace(id=self.owner_id, email="owner@example.com")
+        self.other = SimpleNamespace(id=self.other_id, email="other@example.com")
+        self.current_user = self.owner
+        self.s3 = FakeS3()
+
+        app = FastAPI()
+        app.include_router(router)
+
+        def override_get_db():
+            db = self.Session()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db] = override_get_db
+        app.dependency_overrides[get_current_user] = lambda: self.current_user
+        app.dependency_overrides[get_s3_storage] = lambda: self.s3
+        self.app = app
+        self.client = TestClient(app)
+
+        self.auth_app = FastAPI()
+        self.auth_app.include_router(router)
+        self.auth_app.dependency_overrides[get_db] = override_get_db
+        self.auth_app.dependency_overrides[get_s3_storage] = lambda: self.s3
+        self.unauth_client = TestClient(self.auth_app)
+
+    def tearDown(self):
+        self.engine.dispose()
+
+    def _session(self, upload_id: str) -> DocumentUploadSession:
+        with self.Session() as db:
+            return db.query(DocumentUploadSession).filter_by(id=upload_id).one()
+
+    def _request_upload(
+        self,
+        document_type="cv",
+        file_name="cv.pdf",
+        content_type="application/pdf",
+        file_size=123,
+        client=None,
+    ):
+        http = client or self.client
+        return http.post(
+            "/profile/documents/upload-url",
+            json={
+                "document_type": document_type,
+                "file_name": file_name,
+                "content_type": content_type,
+                "file_size": file_size,
+            },
+        )
+
+    def _upload_and_store(
+        self,
+        document_type="cv",
+        file_name="cv.pdf",
+        content_type="application/pdf",
+        file_size=123,
+        mutate=None,
+    ):
+        response = self._request_upload(
+            document_type=document_type,
+            file_name=file_name,
+            content_type=content_type,
+            file_size=file_size,
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        upload_id = response.json()["upload_id"]
+        session = self._session(upload_id)
+        stored_type = content_type
+        stored_size = file_size
+        if mutate:
+            stored_type, stored_size = mutate(session)
+        self.s3.put(session.object_key, stored_type, stored_size)
+        return upload_id, session, response.json()
+
+    def test_unauthenticated_requests_rejected(self):
+        cases = [
+            ("post", "/profile/documents/upload-url", {"document_type": "cv", "file_name": "cv.pdf", "content_type": "application/pdf", "file_size": 1}),
+            ("post", "/profile/documents/confirm", {"upload_id": "x"}),
+            ("get", "/profile/documents/doc/download-url", None),
+            ("delete", "/profile/documents/doc", None),
+        ]
+        for method, path, body in cases:
+            with self.subTest(path=path):
+                caller = getattr(self.unauth_client, method)
+                response = caller(path, json=body) if body else caller(path)
+                self.assertIn(response.status_code, (401, 403))
+
+    def test_upload_url_rejects_invalid_inputs(self):
+        invalid = [
+            dict(document_type="resume", file_name="cv.pdf", content_type="application/pdf", file_size=10),
+            dict(document_type="cv", file_name="cv.exe", content_type="application/pdf", file_size=10),
+            dict(document_type="cv", file_name="cv.pdf", content_type="image/png", file_size=10),
+            dict(document_type="cv", file_name="cv.pdf", content_type="application/pdf", file_size=settings.S3_MAX_FILE_BYTES + 1),
+        ]
+        for payload in invalid:
+            with self.subTest(payload=payload):
+                response = self.client.post("/profile/documents/upload-url", json=payload)
+                self.assertIn(response.status_code, (400, 422))
+
+    def test_upload_url_creates_session_and_user_prefixed_key(self):
+        response = self._request_upload()
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertIn("upload_id", body)
+        self.assertNotIn("object_key", body)
+        self.assertEqual(body["headers"]["Content-Type"], "application/pdf")
+        session = self._session(body["upload_id"])
+        self.assertEqual(session.status, DocumentUploadSessionStatus.PENDING.value)
+        self.assertTrue(
+            session.object_key.startswith(f"users/{self.owner_id}/documents/cv/")
+        )
+        self.assertTrue(session.object_key.endswith(".pdf"))
+
+    def test_confirm_rejects_invalid_expired_foreign_and_mismatch(self):
+        missing = self.client.post(
+            "/profile/documents/confirm", json={"upload_id": "00000000-0000-0000-0000-000000000000"}
+        )
+        self.assertEqual(missing.status_code, 404)
+
+        upload_id, session, _ = self._upload_and_store()
+        self.s3.objects.pop(session.object_key)
+        missing_object = self.client.post(
+            "/profile/documents/confirm", json={"upload_id": upload_id}
+        )
+        self.assertEqual(missing_object.status_code, 400)
+
+        upload_id, session, _ = self._upload_and_store(
+            mutate=lambda _s: ("image/png", 123)
+        )
+        wrong_type = self.client.post(
+            "/profile/documents/confirm", json={"upload_id": upload_id}
+        )
+        self.assertEqual(wrong_type.status_code, 400)
+
+        upload_id, session, _ = self._upload_and_store(
+            mutate=lambda _s: ("application/pdf", 999)
+        )
+        wrong_size = self.client.post(
+            "/profile/documents/confirm", json={"upload_id": upload_id}
+        )
+        self.assertEqual(wrong_size.status_code, 400)
+
+        upload_id, session, _ = self._upload_and_store()
+        with self.Session() as db:
+            row = db.query(DocumentUploadSession).filter_by(id=upload_id).one()
+            row.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+            db.commit()
+        expired = self.client.post(
+            "/profile/documents/confirm", json={"upload_id": upload_id}
+        )
+        self.assertEqual(expired.status_code, 400)
+
+        upload_id, session, _ = self._upload_and_store()
+        self.current_user = self.other
+        foreign = self.client.post(
+            "/profile/documents/confirm", json={"upload_id": upload_id}
+        )
+        self.assertEqual(foreign.status_code, 404)
+        self.current_user = self.owner
+
+    def test_confirm_writes_public_metadata_to_profile(self):
+        upload_id, session, _ = self._upload_and_store()
+        confirmed = self.client.post(
+            "/profile/documents/confirm", json={"upload_id": upload_id}
+        )
+        self.assertEqual(confirmed.status_code, 200)
+        body = confirmed.json()
+        self.assertEqual(body["status"], "UPLOADED")
+        self.assertEqual(body["document_type"], "cv")
+        self.assertEqual(body["file_name"], "cv.pdf")
+        self.assertNotIn("object_key", body)
+        self.assertNotIn("file_url", body)
+        self.assertNotIn("download_url", body)
+
+        profile = self.client.get("/profile")
+        self.assertEqual(profile.status_code, 200)
+        cv = profile.json()["documents"]["cv"]
+        self.assertEqual(cv["id"], body["id"])
+        self.assertEqual(cv["status"], "UPLOADED")
+        self.assertNotIn("object_key", cv)
+        self.assertNotIn("file_url", cv)
+        self.assertNotIn("download_url", cv)
+
+        with self.Session() as db:
+            stored = db.query(Profile).filter_by(user_id=self.owner_id).one()
+            self.assertEqual(stored.documents_data["cv"]["object_key"], session.object_key)
+            row = db.query(DocumentUploadSession).filter_by(id=upload_id).one()
+            self.assertEqual(row.status, DocumentUploadSessionStatus.CONFIRMED.value)
+
+    def test_recommendation_letters_append_with_ids_and_max(self):
+        ids = []
+        for index in range(settings.S3_MAX_RECOMMENDATION_LETTERS):
+            upload_id, _, _ = self._upload_and_store(
+                document_type="recommendation_letter",
+                file_name=f"letter-{index}.pdf",
+            )
+            confirmed = self.client.post(
+                "/profile/documents/confirm", json={"upload_id": upload_id}
+            )
+            self.assertEqual(confirmed.status_code, 200)
+            ids.append(confirmed.json()["id"])
+
+        self.assertEqual(len(set(ids)), 3)
+        letters = self.client.get("/profile").json()["documents"]["recommendation_letters"]
+        self.assertEqual(len(letters), 3)
+
+        blocked = self._request_upload(
+            document_type="recommendation_letter",
+            file_name="letter-extra.pdf",
+        )
+        self.assertEqual(blocked.status_code, 400)
+
+    def test_download_owner_only_and_expiry_from_config(self):
+        upload_id, _, _ = self._upload_and_store()
+        confirmed = self.client.post(
+            "/profile/documents/confirm", json={"upload_id": upload_id}
+        )
+        document_id = confirmed.json()["id"]
+
+        download = self.client.get(f"/profile/documents/{document_id}/download-url")
+        self.assertEqual(download.status_code, 200)
+        self.assertEqual(
+            download.json()["expires_in"], settings.S3_PRESIGN_GET_EXPIRE_SECONDS
+        )
+        self.assertEqual(self.s3.last_get_expires, settings.S3_PRESIGN_GET_EXPIRE_SECONDS)
+        self.assertTrue(download.json()["download_url"].startswith("https://s3.test/get/"))
+
+        self.current_user = self.other
+        forbidden = self.client.get(f"/profile/documents/{document_id}/download-url")
+        self.assertEqual(forbidden.status_code, 404)
+        self.current_user = self.owner
+
+    def test_delete_removes_object_and_metadata_and_is_idempotent(self):
+        upload_id, session, _ = self._upload_and_store()
+        confirmed = self.client.post(
+            "/profile/documents/confirm", json={"upload_id": upload_id}
+        )
+        document_id = confirmed.json()["id"]
+
+        deleted = self.client.delete(f"/profile/documents/{document_id}")
+        self.assertEqual(deleted.status_code, 204)
+        self.assertIn(session.object_key, self.s3.deleted)
+        self.assertNotIn(session.object_key, self.s3.objects)
+
+        profile = self.client.get("/profile").json()
+        self.assertEqual(profile["documents"]["cv"]["status"], "NOT_UPLOADED")
+        self.assertIsNone(profile["documents"]["cv"]["id"])
+
+        again = self.client.delete(f"/profile/documents/{document_id}")
+        self.assertEqual(again.status_code, 204)
+
+        upload_id, session, _ = self._upload_and_store(file_name="second.pdf")
+        confirmed = self.client.post(
+            "/profile/documents/confirm", json={"upload_id": upload_id}
+        )
+        document_id = confirmed.json()["id"]
+        self.s3.objects.pop(session.object_key)
+        missing_object = self.client.delete(f"/profile/documents/{document_id}")
+        self.assertEqual(missing_object.status_code, 204)
+
+    def test_legacy_client_cannot_write_storage_references(self):
+        put_legacy = self.client.put(
+            "/profile/documents",
+            json={
+                "cv": {
+                    "status": "UPLOADED",
+                    "file_url": "https://evil.example/cv.pdf",
+                    "object_key": "users/999/documents/cv/stolen.pdf",
+                }
+            },
+        )
+        self.assertEqual(put_legacy.status_code, 405)
+
+        old_upload = self.client.post("/profile/documents/upload")
+        self.assertIn(old_upload.status_code, (404, 405))
+
+        profile = self.client.get("/profile").json()
+        self.assertNotEqual(
+            profile["documents"]["cv"].get("file_url"),
+            "https://evil.example/cv.pdf",
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

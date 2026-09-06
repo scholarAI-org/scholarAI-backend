@@ -1,13 +1,20 @@
-from datetime import date, datetime, timezone
+from datetime import date
 from typing import List
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.profile import Experience, Profile
 from app.models.user import User
+from app.schemas.documents import (
+    ConfirmUploadRequest,
+    DownloadUrlResponse,
+    UploadUrlRequest,
+    UploadUrlResponse,
+)
 from app.schemas.profile import (
     AcademicInfo,
     AcademicLevel,
@@ -26,10 +33,17 @@ from app.schemas.profile import (
     SkillsAndLanguages,
     SkillsAndLanguagesSuggestions,
     UploadedFile,
-    UploadStatus,
     UserProfile,
     calculate_profile_completion,
 )
+from app.services.documents import (
+    confirm_upload_session,
+    create_download_url,
+    create_upload_session,
+    delete_document,
+    public_documents,
+)
+from app.services.s3 import StorageClient, get_s3_storage
 
 router = APIRouter(prefix="/profile", tags=["Profile"])
 
@@ -69,11 +83,7 @@ def build_full_profile_response(profile: Profile, user: User) -> UserProfile:
             expected_graduation_year=profile.expected_graduation_year,
         )
 
-    documents_data = (
-        Documents.model_validate(profile.documents_data)
-        if profile.documents_data
-        else Documents()
-    )
+    documents_data = public_documents(profile)
 
     languages_list = (
         [LanguageItem(**lang) for lang in profile.languages_data]
@@ -122,21 +132,24 @@ def build_full_profile_response(profile: Profile, user: User) -> UserProfile:
 # ==========================================
 # GET /profile/personal-info
 # ==========================================
-@router.get("/personal-info", response_model=PersonalInfo)
+@router.get("/personal-info", response_model=PersonalInfo | None)
 def get_personal_info(
     db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
 ):
     profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
-    if not profile:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found."
-        )
+    # Registration creates an empty profile. Do not validate that draft as a
+    # completed PersonalInfo resource; PUT remains strictly validated.
+    if not profile or not all((
+        profile.first_name, profile.last_name, profile.birth_date,
+        profile.gender, profile.nationality, profile.country_of_residence,
+    )):
+        return None
 
     return PersonalInfo(
         first_name=profile.first_name or "",
         last_name=profile.last_name or "",
         email=current_user.email,
-        phone_number=profile.phone_number or "",
+        phone_number=profile.phone_number,
         gender=profile.gender,
         birth_date=profile.birth_date,
         nationality=profile.nationality or "",
@@ -274,24 +287,81 @@ def update_academic_info(
 # ==========================================
 # Upload / Documents Endpoints
 # ==========================================
-@router.post("/documents/upload", response_model=UploadedFile)
-def upload_document(
-    file: UploadFile = File(...), current_user: User = Depends(get_current_user)
+@router.post("/documents/upload-url", response_model=UploadUrlResponse)
+def create_document_upload_url(
+    payload: UploadUrlRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    storage: StorageClient = Depends(get_s3_storage),
 ):
-    file_content = file.file.read()
-    file_size = len(file_content)
-
-    fake_file_url = (
-        f"https://storage.scholarai.com/uploads/{current_user.id}/{file.filename}"
+    session = create_upload_session(
+        db=db,
+        user=current_user,
+        storage=storage,
+        document_type=payload.document_type,
+        file_name=payload.file_name,
+        content_type=payload.content_type,
+        file_size=payload.file_size,
+    )
+    expires_in = settings.S3_PRESIGN_PUT_EXPIRE_SECONDS
+    upload_url = storage.presign_put(
+        session.object_key, session.expected_content_type, expires_in
+    )
+    return UploadUrlResponse(
+        upload_id=session.id,
+        upload_url=upload_url,
+        headers={"Content-Type": session.expected_content_type},
+        expires_in=expires_in,
     )
 
-    return UploadedFile(
-        status=UploadStatus.UPLOADED,
-        file_url=fake_file_url,
-        file_name=file.filename,
-        file_type=file.content_type,
-        file_size=file_size,
-        uploaded_at=datetime.now(timezone.utc),
+
+@router.post("/documents/confirm", response_model=UploadedFile)
+def confirm_document_upload(
+    payload: ConfirmUploadRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    storage: StorageClient = Depends(get_s3_storage),
+):
+    record = confirm_upload_session(
+        db=db,
+        user=current_user,
+        storage=storage,
+        upload_id=payload.upload_id,
+    )
+    return UploadedFile.model_validate(record)
+
+
+@router.get(
+    "/documents/{document_id}/download-url",
+    response_model=DownloadUrlResponse,
+)
+def get_document_download_url(
+    document_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    storage: StorageClient = Depends(get_s3_storage),
+):
+    download_url, expires_in = create_download_url(
+        db=db,
+        user=current_user,
+        storage=storage,
+        document_id=document_id,
+    )
+    return DownloadUrlResponse(download_url=download_url, expires_in=expires_in)
+
+
+@router.delete("/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_profile_document(
+    document_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    storage: StorageClient = Depends(get_s3_storage),
+):
+    delete_document(
+        db=db,
+        user=current_user,
+        storage=storage,
+        document_id=document_id,
     )
 
 
@@ -300,31 +370,7 @@ def get_documents(
     db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
 ):
     profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
-
-    if not profile or not profile.documents_data:
-        return Documents()
-
-    return Documents.model_validate(profile.documents_data)
-
-
-@router.put("/documents", response_model=Documents)
-def update_documents(
-    data: Documents,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
-
-    if not profile:
-        profile = Profile(user_id=current_user.id)
-        db.add(profile)
-
-    profile.documents_data = data.model_dump(mode="json", by_alias=True)
-
-    db.commit()
-    db.refresh(profile)
-
-    return data
+    return public_documents(profile)
 
 
 # ==========================================
