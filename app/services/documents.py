@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import HTTPException, status
+from sqlalchemy import update
 from sqlalchemy.orm import Session
-from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.config import settings
 from app.models.document_upload import (
@@ -161,13 +161,19 @@ def _empty_documents() -> dict[str, Any]:
 
 
 def save_documents(db: Session, profile: Profile, documents: dict[str, Any]) -> None:
-    # JSON columns are not MutableDict/JSONB. Assign a brand-new object so
-    # SQLAlchemy emits UPDATE; in-place nested edits are not detected.
-    profile.documents_data = _json_clone(documents)
-    flag_modified(profile, "documents_data")
-    db.add(profile)
+    """Persist documents with a SQL UPDATE so PostgreSQL JSON actually changes.
+
+    profiles.documents is a plain JSON column (not JSONB, not MutableDict).
+    ORM attribute assignment often does not emit UPDATE for nested JSON.
+    """
+    payload = _json_clone(documents)
+    db.execute(
+        update(Profile.__table__)
+        .where(Profile.__table__.c.id == profile.id)
+        .values(documents=payload)
+    )
     db.commit()
-    db.refresh(profile)
+    db.expire_all()
 
 
 def load_documents_dict(profile: Optional[Profile]) -> dict[str, Any]:
@@ -219,8 +225,10 @@ def _iter_stored_documents(data: dict[str, Any]):
 def find_document(
     data: dict[str, Any], document_id: str
 ) -> Optional[tuple[str, dict[str, Any], bool]]:
+    target = str(document_id)
     for slot, item, is_list in _iter_stored_documents(data):
-        if item.get("id") == document_id:
+        item_id = item.get("id")
+        if item_id is not None and str(item_id) == target:
             return slot, item, is_list
     return None
 
@@ -482,10 +490,16 @@ def delete_document(
     if is_list:
         letters = list(documents.get("recommendation_letters") or [])
         documents["recommendation_letters"] = [
-            letter for letter in letters if letter.get("id") != document_id
+            letter for letter in letters if str(letter.get("id")) != str(document_id)
         ]
     else:
         documents[slot] = _empty_slot(slot)
+
+    if object_key:
+        db.query(DocumentUploadSession).filter(
+            DocumentUploadSession.user_id == user.id,
+            DocumentUploadSession.object_key == object_key,
+        ).delete(synchronize_session=False)
 
     save_documents(db, profile, documents)
 
