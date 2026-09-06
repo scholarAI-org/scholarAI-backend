@@ -133,6 +133,11 @@ class Profile(Base):
     preferred_countries = Column(JSON, default=list)
     is_completed = Column(Boolean, default=False)
 
+    avatar_object_key = Column(String(512), nullable=True)
+    avatar_file_name = Column(String(255), nullable=True)
+    avatar_content_type = Column(String(128), nullable=True)
+    avatar_file_size = Column(Integer, nullable=True)
+    avatar_uploaded_at = Column(DateTime(timezone=True), nullable=True)
 
     # Meta
     profile_completion_percentage = Column(Float, default=0.0)
