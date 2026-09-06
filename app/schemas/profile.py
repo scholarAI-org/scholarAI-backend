@@ -322,6 +322,7 @@ class UserProfile(BaseModel):
     skills_and_languages: Optional[SkillsAndLanguages] = None
     experiences: List[ExperienceResponse] = []
     preferences: Optional[PreferencesResponse] = None
+    avatar_url: Optional[str] = None
     profile_completion_percentage: float = 0.0
 
     model_config = ConfigDict(from_attributes=True)

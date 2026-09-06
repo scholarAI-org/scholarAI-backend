@@ -39,6 +39,8 @@ class StorageClient(Protocol):
 
 def generate_object_key(user_id: int, document_type: str, extension: str) -> str:
     safe_ext = extension.lower().lstrip(".")
+    if document_type == "avatar":
+        return f"users/{user_id}/avatar/{uuid.uuid4()}.{safe_ext}"
     return f"users/{user_id}/documents/{document_type}/{uuid.uuid4()}.{safe_ext}"
 
 

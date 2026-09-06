@@ -32,6 +32,21 @@ class ConfirmUploadRequest(BaseModel):
     upload_id: str = Field(..., min_length=1, max_length=36)
 
 
+class AvatarUploadUrlRequest(BaseModel):
+    file_name: str = Field(..., min_length=1, max_length=255)
+    content_type: str = Field(..., min_length=3, max_length=128)
+    file_size: int = Field(..., gt=0)
+
+
+class AvatarConfirmResponse(BaseModel):
+    file_name: str
+    content_type: str
+    file_size: int
+    uploaded_at: datetime
+    avatar_url: str
+    expires_in: int
+
+
 class DownloadUrlResponse(BaseModel):
     download_url: str
     expires_in: int

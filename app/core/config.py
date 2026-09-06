@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     S3_PRESIGN_PUT_EXPIRE_SECONDS: int = 300
     S3_PRESIGN_GET_EXPIRE_SECONDS: int = 120
     S3_MAX_FILE_BYTES: int = 10 * 1024 * 1024
+    S3_MAX_AVATAR_BYTES: int = 5 * 1024 * 1024
     S3_MAX_RECOMMENDATION_LETTERS: int = 3
 
 

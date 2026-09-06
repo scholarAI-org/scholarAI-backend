@@ -1,5 +1,5 @@
 from datetime import date
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -10,6 +10,8 @@ from app.core.security import get_current_user
 from app.models.profile import Experience, Profile
 from app.models.user import User
 from app.schemas.documents import (
+    AvatarConfirmResponse,
+    AvatarUploadUrlRequest,
     ConfirmUploadRequest,
     DownloadUrlResponse,
     UploadUrlRequest,
@@ -36,6 +38,12 @@ from app.schemas.profile import (
     UserProfile,
     calculate_profile_completion,
 )
+from app.services.avatar import (
+    avatar_presigned_url,
+    confirm_avatar_upload,
+    create_avatar_upload_session,
+    delete_avatar,
+)
 from app.services.documents import (
     confirm_upload_session,
     create_download_url,
@@ -51,7 +59,11 @@ router = APIRouter(prefix="/profile", tags=["Profile"])
 # ==========================================
 # Helper Function: Build Response & Calculate Completion
 # ==========================================
-def build_full_profile_response(profile: Profile, user: User) -> UserProfile:
+def build_full_profile_response(
+    profile: Profile,
+    user: User,
+    storage: Optional[StorageClient] = None,
+) -> UserProfile:
     # المعلومات الشخصية — تتعامل مع profile فارغ (مستخدم جديد لم يُكمل بياناته)
     personal_info = None
     if profile.first_name and profile.last_name and profile.birth_date and profile.gender and profile.nationality and profile.country_of_residence:
@@ -125,6 +137,7 @@ def build_full_profile_response(profile: Profile, user: User) -> UserProfile:
         skills_and_languages=skills_and_languages,
         experiences=experiences_list,
         preferences=preferences_data,
+        avatar_url=avatar_presigned_url(profile, storage) if storage is not None else None,
         profile_completion_percentage=completion_percentage,
     )
 
@@ -282,6 +295,87 @@ def update_academic_info(
         current_study_language=profile.current_study_language or [],
         expected_graduation_year=profile.expected_graduation_year,
     )
+
+
+# ==========================================
+# Avatar Endpoints
+# ==========================================
+@router.post("/avatar/upload-url", response_model=UploadUrlResponse)
+def create_avatar_upload_url(
+    payload: AvatarUploadUrlRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    storage: StorageClient = Depends(get_s3_storage),
+):
+    session = create_avatar_upload_session(
+        db=db,
+        user=current_user,
+        storage=storage,
+        file_name=payload.file_name,
+        content_type=payload.content_type,
+        file_size=payload.file_size,
+    )
+    expires_in = settings.S3_PRESIGN_PUT_EXPIRE_SECONDS
+    upload_url = storage.presign_put(
+        session.object_key, session.expected_content_type, expires_in
+    )
+    return UploadUrlResponse(
+        upload_id=session.id,
+        upload_url=upload_url,
+        headers={"Content-Type": session.expected_content_type},
+        expires_in=expires_in,
+    )
+
+
+@router.post("/avatar/confirm", response_model=AvatarConfirmResponse)
+def confirm_profile_avatar(
+    payload: ConfirmUploadRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    storage: StorageClient = Depends(get_s3_storage),
+):
+    profile, avatar_url, expires_in = confirm_avatar_upload(
+        db=db,
+        user=current_user,
+        storage=storage,
+        upload_id=payload.upload_id,
+    )
+    return AvatarConfirmResponse(
+        file_name=profile.avatar_file_name or "",
+        content_type=profile.avatar_content_type or "",
+        file_size=profile.avatar_file_size or 0,
+        uploaded_at=profile.avatar_uploaded_at,
+        avatar_url=avatar_url,
+        expires_in=expires_in,
+    )
+
+
+@router.get("/avatar/url", response_model=DownloadUrlResponse)
+def get_avatar_url(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    storage: StorageClient = Depends(get_s3_storage),
+):
+    profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
+    avatar_url = avatar_presigned_url(profile, storage)
+    if not avatar_url:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="لا يوجد أفاتار.",
+        )
+    return DownloadUrlResponse(
+        download_url=avatar_url,
+        expires_in=settings.S3_PRESIGN_GET_EXPIRE_SECONDS,
+    )
+
+
+@router.delete("/avatar", status_code=status.HTTP_204_NO_CONTENT)
+def delete_profile_avatar(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    storage: StorageClient = Depends(get_s3_storage),
+):
+    delete_avatar(db=db, user=current_user, storage=storage)
 
 
 # ==========================================
@@ -615,7 +709,9 @@ def update_preferences(
 # ==========================================
 @router.get("", response_model=UserProfile)
 def get_user_profile(
-    db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    storage: StorageClient = Depends(get_s3_storage),
 ):
     profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
 
@@ -626,4 +722,4 @@ def get_user_profile(
         db.commit()
         db.refresh(profile)
 
-    return build_full_profile_response(profile, current_user)
+    return build_full_profile_response(profile, current_user, storage)
