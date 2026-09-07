@@ -131,6 +131,8 @@ class Profile(Base):
     funding_type = Column(Enum(FundingType), nullable=True)
     preferred_fields_of_study = Column(JSON, default=list)
     preferred_countries = Column(JSON, default=list)
+    open_to_all_countries = Column(Boolean, default=False, nullable=True)
+    has_experience = Column(Boolean, nullable=True)
     is_completed = Column(Boolean, default=False)
 
     avatar_object_key = Column(String(512), nullable=True)

@@ -12,6 +12,7 @@ class ProfileDocumentType(str, Enum):
     PASSPORT = "passport"
     RECOMMENDATION_LETTER = "recommendation_letter"
     ENGLISH_TEST = "english_test"
+    MOTIVATION_LETTER = "motivation_letter"
 
 
 class UploadUrlRequest(BaseModel):
