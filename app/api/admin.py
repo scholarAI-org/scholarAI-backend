@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func
@@ -8,11 +8,15 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models import Scholarship
 from app.models.admin_notification import AdminNotification
+from app.models.profile import Profile
 from app.models.user import User
 from app.schemas.admin import (
     AdminDashboardStatistics,
     AdminNotificationUnreadCountResponse,
+    AdminProfileResponse,
 )
+from app.services.avatar import avatar_presigned_url
+from app.services.s3 import StorageClient, get_s3_storage
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -94,3 +98,50 @@ def get_unread_notifications_count(
     ) or 0
 
     return AdminNotificationUnreadCountResponse(unread_count=unread_count)
+
+
+@router.get(
+    "/profile",
+    response_model=AdminProfileResponse,
+    summary="Get current admin profile",
+    description=(
+        "Returns the authenticated administrator's profile information "
+        "(id, full_name, email, role, avatar_url) to display in the dashboard header. "
+        "Requires an authenticated admin."
+    ),
+    responses={
+        401: {"description": "Missing or invalid authentication"},
+        403: {"description": "Requires admin role"},
+    },
+)
+@router.get(
+    "/me",
+    response_model=AdminProfileResponse,
+    include_in_schema=False,
+)
+def get_current_admin_profile(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    storage: Annotated[StorageClient, Depends(get_s3_storage)],
+) -> AdminProfileResponse:
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This operation is restricted to administrators.",
+        )
+
+    profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
+    avatar_url: Optional[str] = None
+    if profile and profile.avatar_object_key:
+        try:
+            avatar_url = avatar_presigned_url(profile, storage)
+        except Exception:
+            avatar_url = None
+
+    return AdminProfileResponse(
+        id=current_user.id,
+        full_name=current_user.full_name or "",
+        email=current_user.email,
+        role=current_user.role,
+        avatar_url=avatar_url,
+    )
