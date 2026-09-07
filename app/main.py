@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError, OperationalError, SQLAlchemyError
 
+from app.api.admin import router as admin_router
 from app.api.auth import router as auth_router
 from app.api.profile import router as profile_router
 from app.api.scholarships import router as scholarships_router
@@ -23,6 +24,10 @@ app = FastAPI(
         "Protected routes require a Bearer token from `/auth/login`."
     ),
     openapi_tags=[
+        {
+            "name": "Admin",
+            "description": "Dashboard statistics. Requires an authenticated admin.",
+        },
         {
             "name": "Authentication",
             "description": "Register, login, logout, and password reset. Send JSON, not form data.",
@@ -102,6 +107,7 @@ async def sqlalchemy_error_handler(request: Request, exc: SQLAlchemyError):
     )
 
 
+app.include_router(admin_router)
 app.include_router(auth_router)
 app.include_router(profile_router)
 app.include_router(scholarships_router)
