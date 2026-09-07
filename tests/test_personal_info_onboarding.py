@@ -49,7 +49,7 @@ class PersonalInfoOnboardingTests(unittest.TestCase):
     def test_first_put_then_get_returns_completed_information(self):
         payload = dict(first_name='Sara', last_name='Ahmad', email=self.user.email,
                        gender='FEMALE', birth_date='2000-01-15', nationality='PS',
-                       country_of_residence='JO')
+                       country_of_residence='JO', financial_status='LIMITED')
         response = self.client.put('/profile/personal-info', json=payload)
         self.assertEqual(response.status_code, 200)
         self.db.commit.assert_called_once()
@@ -58,6 +58,14 @@ class PersonalInfoOnboardingTests(unittest.TestCase):
         for key, value in payload.items():
             self.assertEqual(loaded.json()[key], value)
         self.assertIsNone(loaded.json()['phone_number'])
+
+    def test_put_without_financial_status_is_rejected(self):
+        payload = dict(first_name='Sara', last_name='Ahmad', email=self.user.email,
+                       gender='FEMALE', birth_date='2000-01-15', nationality='PS',
+                       country_of_residence='JO')
+        response = self.client.put('/profile/personal-info', json=payload)
+        self.assertEqual(response.status_code, 422)
+        self.db.commit.assert_not_called()
 
     def test_incomplete_put_is_still_rejected(self):
         response = self.client.put('/profile/personal-info', json={'first_name': 'Sara'})

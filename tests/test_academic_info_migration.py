@@ -90,7 +90,7 @@ def test_upgrade_preserves_legacy_data_and_downgrade_protects_new_values():
                 connection.execute(
                     text("SELECT version_num FROM alembic_version")
                 ).scalar_one()
-                == "20260907_01"
+                == "20260907_02"
             )
             assert (
                 connection.execute(
@@ -102,5 +102,63 @@ def test_upgrade_preserves_legacy_data_and_downgrade_protects_new_values():
             connection.execute(
                 text("DELETE FROM users WHERE id=:user_id"), {"user_id": user_id}
             )
+    finally:
+        engine.dispose()
+
+
+def test_completion_flag_migration_preserves_existing_academic_values():
+    engine = create_engine(MIGRATION_DATABASE)
+    assert engine.url.host in {"localhost", "127.0.0.1"}
+    assert engine.url.database.startswith("scholarai_academic_test_")
+    try:
+        assert migrate("20260907_01", "downgrade").returncode == 0
+        with engine.begin() as connection:
+            user_id = connection.execute(
+                text(
+                    "INSERT INTO users (full_name, email, hashed_password, is_email_verified) "
+                    "VALUES ('Flags Test', 'completion-migration@example.com', 'unused', true) RETURNING id"
+                )
+            ).scalar_one()
+            connection.execute(
+                text(
+                    "INSERT INTO profiles (user_id, field_of_study) VALUES (:id, 'Software Engineering')"
+                ),
+                {"id": user_id},
+            )
+        assert migrate("head").returncode == 0
+        with engine.begin() as connection:
+            row = connection.execute(
+                text(
+                    "SELECT field_of_study, has_experience, open_to_all_countries FROM profiles WHERE user_id=:id"
+                ),
+                {"id": user_id},
+            ).one()
+            assert tuple(row) == ("Software Engineering", None, None)
+            connection.execute(
+                text(
+                    "UPDATE profiles SET has_experience=false, open_to_all_countries=true WHERE user_id=:id"
+                ),
+                {"id": user_id},
+            )
+        with engine.connect() as connection:
+            row = connection.execute(
+                text(
+                    "SELECT has_experience, open_to_all_countries FROM profiles WHERE user_id=:id"
+                ),
+                {"id": user_id},
+            ).one()
+            assert tuple(row) == (False, True)
+        assert migrate("20260907_01", "downgrade").returncode == 0
+        with engine.connect() as connection:
+            assert (
+                connection.execute(
+                    text("SELECT field_of_study FROM profiles WHERE user_id=:id"),
+                    {"id": user_id},
+                ).scalar_one()
+                == "Software Engineering"
+            )
+        assert migrate("head").returncode == 0
+        with engine.begin() as connection:
+            connection.execute(text("DELETE FROM users WHERE id=:id"), {"id": user_id})
     finally:
         engine.dispose()

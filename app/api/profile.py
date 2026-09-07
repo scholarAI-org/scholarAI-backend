@@ -1,6 +1,7 @@
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -62,7 +63,15 @@ def build_full_profile_response(
 ) -> UserProfile:
     # المعلومات الشخصية — تتعامل مع profile فارغ (مستخدم جديد لم يُكمل بياناته)
     personal_info = None
-    if profile.first_name and profile.last_name and profile.birth_date and profile.gender and profile.nationality and profile.country_of_residence:
+    if (
+        profile.first_name
+        and profile.last_name
+        and profile.birth_date
+        and profile.gender
+        and profile.nationality
+        and profile.country_of_residence
+        and profile.financial_status
+    ):
         personal_info = PersonalInfo(
             first_name=profile.first_name,
             last_name=profile.last_name,
@@ -101,6 +110,7 @@ def build_full_profile_response(
         funding_type=profile.funding_type,
         preferred_fields_of_study=profile.preferred_fields_of_study or [],
         preferred_countries=profile.preferred_countries or [],
+        open_to_all_countries=bool(profile.open_to_all_countries),
         is_profile_completed=bool(profile.desired_degree_level and profile.funding_type),
     )
 
@@ -111,6 +121,8 @@ def build_full_profile_response(
         skills_and_languages=skills_and_languages,
         experiences=experiences_list,
         preferences=preferences_data,
+        has_experience=profile.has_experience,
+        open_to_all_countries=profile.open_to_all_countries,
     )
 
     return UserProfile(
@@ -121,6 +133,7 @@ def build_full_profile_response(
         documents=documents_data,
         skills_and_languages=skills_and_languages,
         experiences=experiences_list,
+        has_experience=profile.has_experience,
         preferences=preferences_data,
         avatar_url=avatar_presigned_url(profile, storage) if storage is not None else None,
         profile_completion_percentage=completion_percentage,
@@ -140,6 +153,7 @@ def get_personal_info(
     if not profile or not all((
         profile.first_name, profile.last_name, profile.birth_date,
         profile.gender, profile.nationality, profile.country_of_residence,
+        profile.financial_status,
     )):
         return None
 
@@ -534,6 +548,7 @@ def create_experience(
         db.commit()
         db.refresh(profile)
 
+    profile.has_experience = True
     new_exp = Experience(
         profile_id=profile.id,
         experience_type=data.experience_type,
@@ -549,6 +564,27 @@ def create_experience(
     db.commit()
     db.refresh(new_exp)
     return new_exp
+
+
+class ExperienceStatusUpdate(BaseModel):
+    has_experience: bool
+
+
+@router.put("/experiences/status", response_model=dict)
+def update_experience_status(
+    data: ExperienceStatusUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
+    if not profile:
+        profile = Profile(user_id=current_user.id)
+        db.add(profile)
+
+    profile.has_experience = data.has_experience
+    db.commit()
+    db.refresh(profile)
+    return {"has_experience": profile.has_experience}
 
 
 @router.put("/experiences/{exp_id}", response_model=ExperienceResponse)
@@ -631,6 +667,7 @@ def get_preferences(
         funding_type=profile.funding_type,
         preferred_fields_of_study=profile.preferred_fields_of_study or [],
         preferred_countries=profile.preferred_countries or [],
+        open_to_all_countries=bool(profile.open_to_all_countries),
         is_profile_completed=bool(profile.desired_degree_level and profile.funding_type),
     )
 
@@ -647,10 +684,16 @@ def update_preferences(
         profile = Profile(user_id=current_user.id)
         db.add(profile)
 
-    profile.desired_degree_level = data.desired_degree_level
-    profile.funding_type = data.funding_type
-    profile.preferred_fields_of_study = data.preferred_fields_of_study
-    profile.preferred_countries = data.preferred_countries
+    if data.desired_degree_level is not None:
+        profile.desired_degree_level = data.desired_degree_level
+    if data.funding_type is not None:
+        profile.funding_type = data.funding_type
+    if data.preferred_fields_of_study is not None:
+        profile.preferred_fields_of_study = data.preferred_fields_of_study
+    if data.preferred_countries is not None:
+        profile.preferred_countries = data.preferred_countries
+    if data.open_to_all_countries is not None:
+        profile.open_to_all_countries = data.open_to_all_countries
 
     db.commit()
     db.refresh(profile)
@@ -658,8 +701,9 @@ def update_preferences(
     return PreferencesResponse(
         desired_degree_level=profile.desired_degree_level,
         funding_type=profile.funding_type,
-        preferred_fields_of_study=profile.preferred_fields_of_study,
-        preferred_countries=profile.preferred_countries,
+        preferred_fields_of_study=profile.preferred_fields_of_study or [],
+        preferred_countries=profile.preferred_countries or [],
+        open_to_all_countries=bool(profile.open_to_all_countries),
         is_profile_completed=bool(profile.desired_degree_level and profile.funding_type),
     )
 
