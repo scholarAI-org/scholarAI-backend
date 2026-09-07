@@ -56,10 +56,14 @@ class FakeS3:
         self.deleted.append(object_key)
         self.objects.pop(object_key, None)
 
-    def put(self, object_key, content_type, size):
+    def get_object_bytes(self, object_key, max_bytes):
+        return self.objects[object_key].get("body", b"")[: max_bytes + 1]
+
+    def put(self, object_key, content_type, size, body=None):
         self.objects[object_key] = {
             "content_type": content_type,
             "content_length": size,
+            "body": body,
         }
 
 
@@ -341,7 +345,7 @@ class DocumentUploadTests(unittest.TestCase):
         self.assertEqual(forbidden.status_code, 404)
         self.current_user = self.owner
 
-    def test_delete_removes_object_and_metadata_and_is_idempotent(self):
+    def test_delete_removes_object_and_metadata_and_missing_returns_404(self):
         upload_id, session, _ = self._upload_and_store()
         confirmed = self.client.post(
             "/profile/documents/confirm", json={"upload_id": upload_id}
@@ -358,7 +362,7 @@ class DocumentUploadTests(unittest.TestCase):
         self.assertIsNone(profile["documents"]["cv"]["id"])
 
         again = self.client.delete(f"/profile/documents/{document_id}")
-        self.assertEqual(again.status_code, 204)
+        self.assertEqual(again.status_code, 404)
 
         upload_id, session, _ = self._upload_and_store(file_name="second.pdf")
         confirmed = self.client.post(
@@ -372,6 +376,22 @@ class DocumentUploadTests(unittest.TestCase):
         with self.Session() as db:
             stored = db.query(Profile).filter_by(user_id=self.owner_id).one()
             self.assertEqual(stored.documents_data["cv"]["status"], "NOT_UPLOADED")
+
+    def test_delete_is_owner_only(self):
+        upload_id, session, _ = self._upload_and_store()
+        confirmed = self.client.post(
+            "/profile/documents/confirm", json={"upload_id": upload_id}
+        )
+        document_id = confirmed.json()["id"]
+
+        self.current_user = self.other
+        forbidden = self.client.delete(f"/profile/documents/{document_id}")
+        self.assertEqual(forbidden.status_code, 404)
+        self.assertIn(session.object_key, self.s3.objects)
+
+        self.current_user = self.owner
+        deleted = self.client.delete(f"/profile/documents/{document_id}")
+        self.assertEqual(deleted.status_code, 204)
 
     def test_delete_persists_empty_cv_on_fresh_db_query(self):
         document_id = "cv-doc-1"

@@ -469,12 +469,18 @@ def delete_document(
 ) -> None:
     profile = db.query(Profile).filter(Profile.user_id == user.id).first()
     if profile is None:
-        return
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="الوثيقة غير موجودة.",
+        )
 
     documents = load_documents_dict(profile)
     found = find_document(documents, document_id)
     if found is None:
-        return
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="الوثيقة غير موجودة.",
+        )
 
     slot, item, is_list = found
     object_key = item.get("object_key")

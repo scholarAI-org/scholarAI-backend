@@ -33,6 +33,9 @@ class StorageClient(Protocol):
     def head_object(self, object_key: str) -> ObjectHead:
         ...
 
+    def get_object_bytes(self, object_key: str, max_bytes: int) -> bytes:
+        ...
+
     def delete_object(self, object_key: str) -> None:
         ...
 
@@ -98,6 +101,14 @@ class S3Storage:
             content_type=response.get("ContentType"),
             content_length=response.get("ContentLength"),
         )
+
+    def get_object_bytes(self, object_key: str, max_bytes: int) -> bytes:
+        response = self._client.get_object(Bucket=self._bucket, Key=object_key)
+        stream = response["Body"]
+        try:
+            return stream.read(max_bytes + 1)
+        finally:
+            stream.close()
 
     def delete_object(self, object_key: str) -> None:
         """Idempotent delete. Missing objects are not an error."""

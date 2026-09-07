@@ -1,5 +1,6 @@
 import os
 import unittest
+from io import BytesIO
 from types import SimpleNamespace
 
 os.environ["DATABASE_URL"] = "sqlite://"
@@ -8,6 +9,7 @@ os.environ.setdefault("AWS_S3_BUCKET", "test-bucket")
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from PIL import Image
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -21,6 +23,15 @@ from app.models.profile import Experience, Profile
 from app.models.user import User
 from app.services.s3 import get_s3_storage
 from tests.test_document_uploads import FakeS3
+
+
+def _image_bytes(content_type: str) -> bytes:
+    image_format = {"image/jpeg": "JPEG", "image/png": "PNG", "image/webp": "WEBP"}[
+        content_type
+    ]
+    output = BytesIO()
+    Image.new("RGB", (2, 2), color="blue").save(output, format=image_format)
+    return output.getvalue()
 
 
 class AvatarUploadTests(unittest.TestCase):
@@ -84,9 +95,15 @@ class AvatarUploadTests(unittest.TestCase):
         self,
         file_name="avatar.jpg",
         content_type="image/jpeg",
-        file_size=123,
+        file_size=None,
         client=None,
     ):
+        if file_size is None:
+            file_size = (
+                len(_image_bytes(content_type))
+                if content_type in {"image/jpeg", "image/png", "image/webp"}
+                else 123
+            )
         http = client or self.client
         return http.post(
             "/profile/avatar/upload-url",
@@ -106,7 +123,9 @@ class AvatarUploadTests(unittest.TestCase):
             object_key = session.object_key
             content_type = session.expected_content_type
             size = session.expected_file_size
-        self.s3.put(object_key, content_type, size)
+        body = _image_bytes(content_type)
+        self.assertEqual(len(body), size)
+        self.s3.put(object_key, content_type, size, body=body)
         return upload_id, object_key
 
     def test_unauthenticated_upload_url_rejected(self):
@@ -145,7 +164,7 @@ class AvatarUploadTests(unittest.TestCase):
             profile = db.query(Profile).filter_by(user_id=self.owner_id).one()
             self.assertEqual(profile.avatar_object_key, object_key)
             self.assertEqual(profile.avatar_content_type, "image/jpeg")
-            self.assertEqual(profile.avatar_file_size, 123)
+            self.assertEqual(profile.avatar_file_size, len(_image_bytes("image/jpeg")))
 
         loaded = self.client.get("/profile")
         self.assertEqual(loaded.status_code, 200)
@@ -153,6 +172,42 @@ class AvatarUploadTests(unittest.TestCase):
             loaded.json()["avatar_url"].startswith("https://s3.test/get/")
         )
         self.assertIn(object_key, loaded.json()["avatar_url"])
+
+    def test_confirm_rejects_invalid_image_content(self):
+        invalid_body = b"not an image"
+        response = self._request_upload(file_size=len(invalid_body))
+        upload_id = response.json()["upload_id"]
+        with self.Session() as db:
+            session = db.query(DocumentUploadSession).filter_by(id=upload_id).one()
+            self.s3.put(
+                session.object_key,
+                session.expected_content_type,
+                len(invalid_body),
+                body=invalid_body,
+            )
+
+        confirmed = self.client.post(
+            "/profile/avatar/confirm", json={"upload_id": upload_id}
+        )
+        self.assertEqual(confirmed.status_code, 400)
+
+    def test_confirm_rejects_image_content_type_mismatch(self):
+        png_body = _image_bytes("image/png")
+        response = self._request_upload(file_size=len(png_body))
+        upload_id = response.json()["upload_id"]
+        with self.Session() as db:
+            session = db.query(DocumentUploadSession).filter_by(id=upload_id).one()
+            self.s3.put(
+                session.object_key,
+                "image/jpeg",
+                len(png_body),
+                body=png_body,
+            )
+
+        confirmed = self.client.post(
+            "/profile/avatar/confirm", json={"upload_id": upload_id}
+        )
+        self.assertEqual(confirmed.status_code, 400)
 
     def test_replacing_avatar_deletes_old_object(self):
         first_id, first_key = self._upload_and_store(file_name="one.png", content_type="image/png")
@@ -165,6 +220,24 @@ class AvatarUploadTests(unittest.TestCase):
         with self.Session() as db:
             profile = db.query(Profile).filter_by(user_id=self.owner_id).one()
             self.assertEqual(profile.avatar_object_key, second_key)
+
+    def test_replacing_avatar_does_not_delete_shared_default(self):
+        shared_key = "shared/default-avatar.png"
+        with self.Session() as db:
+            profile = db.query(Profile).filter_by(user_id=self.owner_id).one()
+            profile.avatar_object_key = shared_key
+            db.commit()
+
+        upload_id, new_key = self._upload_and_store()
+        confirmed = self.client.post(
+            "/profile/avatar/confirm", json={"upload_id": upload_id}
+        )
+
+        self.assertEqual(confirmed.status_code, 200, confirmed.text)
+        self.assertNotIn(shared_key, self.s3.deleted)
+        with self.Session() as db:
+            profile = db.query(Profile).filter_by(user_id=self.owner_id).one()
+            self.assertEqual(profile.avatar_object_key, new_key)
 
     def test_delete_clears_avatar_and_profile_url_is_null(self):
         upload_id, object_key = self._upload_and_store()

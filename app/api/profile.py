@@ -1,4 +1,3 @@
-from datetime import date
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -18,16 +17,12 @@ from app.schemas.documents import (
     UploadUrlResponse,
 )
 from app.schemas.profile import (
+    GPA,
     AcademicInfo,
-    AcademicLevel,
     Documents,
     ExperienceCreate,
     ExperienceResponse,
     ExperienceUpdate,
-    FieldOfStudy,
-    Gender,
-    GPA,
-    GPAScale,
     LanguageItem,
     PersonalInfo,
     PreferencesResponse,
@@ -520,12 +515,40 @@ def get_suggestions():
     )
 
 
-@router.put("/skills-and-languages", response_model=SkillsAndLanguages)
+def _find_duplicate(values: List[str]) -> str | None:
+    seen: set[str] = set()
+    for value in values:
+        normalized = value.casefold()
+        if normalized in seen:
+            return value
+        seen.add(normalized)
+    return None
+
+
+@router.put(
+    "/skills-and-languages",
+    response_model=SkillsAndLanguages,
+    responses={409: {"description": "A language or skill is duplicated."}},
+)
 def update_skills_and_languages(
     data: SkillsAndLanguages,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    duplicate_language = _find_duplicate([item.name for item in data.languages])
+    if duplicate_language is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Duplicate language: {duplicate_language}.",
+        )
+
+    duplicate_skill = _find_duplicate(data.skills)
+    if duplicate_skill is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Duplicate skill: {duplicate_skill}.",
+        )
+
     profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
 
     if not profile:

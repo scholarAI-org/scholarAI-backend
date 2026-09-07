@@ -1,6 +1,7 @@
 from datetime import date, datetime
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Annotated, Dict, List, Optional
+
 from pydantic import (
     AliasChoices,
     BaseModel,
@@ -222,10 +223,24 @@ class LanguageItem(BaseModel):
     name: str = Field(..., min_length=2, max_length=50)
     proficiency: LanguageProficiency
 
+    @field_validator("name", mode="before")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        return value.strip() if isinstance(value, str) else value
+
 
 class SkillsAndLanguages(BaseModel):
-    languages: List[LanguageItem] = []
-    skills: List[str] = []
+    languages: List[LanguageItem] = Field(default_factory=list, max_length=50)
+    skills: List[
+        Annotated[str, Field(min_length=2, max_length=100)]
+    ] = Field(default_factory=list, max_length=100)
+
+    @field_validator("skills", mode="before")
+    @classmethod
+    def normalize_skills(cls, value: List[str]) -> List[str]:
+        if not isinstance(value, list):
+            return value
+        return [item.strip() if isinstance(item, str) else item for item in value]
 
 
 class SkillsAndLanguagesSuggestions(BaseModel):
