@@ -7,8 +7,12 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models import Scholarship
+from app.models.admin_notification import AdminNotification
 from app.models.user import User
-from app.schemas.admin import AdminDashboardStatistics
+from app.schemas.admin import (
+    AdminDashboardStatistics,
+    AdminNotificationUnreadCountResponse,
+)
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -58,3 +62,35 @@ def get_dashboard_statistics(
         published_scholarships=counts.published_scholarships,
         users=counts.users,
     )
+
+
+@router.get(
+    "/notifications/unread-count",
+    response_model=AdminNotificationUnreadCountResponse,
+    summary="Get admin unread notifications count",
+    description=(
+        "Returns the count of unread notifications for the admin notification bell counter. "
+        "Requires an authenticated admin."
+    ),
+    responses={
+        401: {"description": "Missing or invalid authentication"},
+        403: {"description": "Requires admin role"},
+    },
+)
+def get_unread_notifications_count(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> AdminNotificationUnreadCountResponse:
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This operation is restricted to administrators.",
+        )
+
+    unread_count = (
+        db.query(func.count(AdminNotification.id))
+        .filter(AdminNotification.is_read == False)  # noqa: E712
+        .scalar()
+    ) or 0
+
+    return AdminNotificationUnreadCountResponse(unread_count=unread_count)
