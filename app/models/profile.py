@@ -5,13 +5,13 @@ from sqlalchemy import (
     Boolean,
     Column,
     Date,
+    DateTime,
     Enum,
     Float,
     ForeignKey,
     Integer,
     String,
     Text,
-    DateTime,
     func,
 )
 from sqlalchemy.orm import relationship
@@ -37,23 +37,9 @@ class AcademicLevel(str, enum.Enum):
     PHD = "PHD"
 
 
-class FieldOfStudy(str, enum.Enum):
-    # فروع التوجيهي
-    SCIENTIFIC = "SCIENTIFIC"
-    LITERARY = "LITERARY"
-    SHARIA = "SHARIA"
-    INDUSTRIAL = "INDUSTRIAL"
-    ENTREPRENEURSHIP_BUSINESS = "ENTREPRENEURSHIP_BUSINESS"
-    AGRICULTURAL = "AGRICULTURAL"
-    HOME_ECONOMICS = "HOME_ECONOMICS"
-
-    # التخصصات الجامعية
-    ENGINEERING = "ENGINEERING"
-    COMPUTER_SCIENCE = "COMPUTER_SCIENCE"
-    MEDICINE = "MEDICINE"
-    BUSINESS = "BUSINESS"
-    ARTS = "ARTS"
-    OTHER = "OTHER"
+class StudyStatus(str, enum.Enum):
+    CURRENTLY_STUDYING = "CURRENTLY_STUDYING"
+    GRADUATED = "GRADUATED"
 
 
 class GPAScale(str, enum.Enum):
@@ -111,7 +97,13 @@ class Profile(Base):
 
     # Academic Info
     academic_level = Column(Enum(AcademicLevel), nullable=True)
-    field_of_study = Column(Enum(FieldOfStudy), nullable=True)
+    field_of_study = Column(String(255), nullable=True)
+    field_of_study_openalex_id = Column(String(255), nullable=True)
+    study_status = Column(Enum(StudyStatus), nullable=True)
+    target_field_of_study = Column(String(255), nullable=True)
+    target_field_of_study_openalex_id = Column(String(255), nullable=True)
+    research_specialization = Column(String(255), nullable=True)
+    research_specialization_openalex_id = Column(String(255), nullable=True)
     institution = Column(String(255), nullable=True)
     gpa_value = Column(Float, nullable=True)
     gpa_scale = Column(Enum(GPAScale), nullable=True)

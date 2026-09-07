@@ -1,12 +1,15 @@
 from datetime import date, datetime
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Annotated, Dict, List, Optional
+
 from pydantic import (
     AliasChoices,
     BaseModel,
     ConfigDict,
     EmailStr,
     Field,
+    StringConstraints,
+    ValidationError,
     field_validator,
     model_validator,
 )
@@ -33,21 +36,16 @@ class AcademicLevel(str, Enum):
     PHD = "PHD"
 
 
-class FieldOfStudy(str, Enum):
+class HighSchoolTrack(str, Enum):
     SCIENTIFIC = "SCIENTIFIC"
     LITERARY = "LITERARY"
     SHARIA = "SHARIA"
     INDUSTRIAL = "INDUSTRIAL"
-    ENTREPRENEURSHIP_BUSINESS = "ENTREPRENEURSHIP_BUSINESS"
-    AGRICULTURAL = "AGRICULTURAL"
-    HOME_ECONOMICS = "HOME_ECONOMICS"
 
-    ENGINEERING = "ENGINEERING"
-    COMPUTER_SCIENCE = "COMPUTER_SCIENCE"
-    MEDICINE = "MEDICINE"
-    BUSINESS = "BUSINESS"
-    ARTS = "ARTS"
-    OTHER = "OTHER"
+
+class StudyStatus(str, Enum):
+    CURRENTLY_STUDYING = "CURRENTLY_STUDYING"
+    GRADUATED = "GRADUATED"
 
 
 class GPAScale(str, Enum):
@@ -151,7 +149,7 @@ class PersonalInfoUpdate(BaseModel):
 
 
 class GPA(BaseModel):
-    value: float = Field(..., ge=0.0)
+    value: float = Field(..., ge=0.0, strict=True, allow_inf_nan=False)
     scale: GPAScale
 
     @model_validator(mode="after")
@@ -168,25 +166,114 @@ class GPA(BaseModel):
         return self
 
 
-class AcademicInfo(BaseModel):
-    academic_level: AcademicLevel
-    field_of_study: FieldOfStudy
-    institution: str = Field(..., min_length=2, max_length=255)
-    gpa: Optional[GPA] = None
-
-    current_study_language: List[str] = []
-    expected_graduation_year: Optional[int] = Field(None, ge=1990, le=2035)
-
-    model_config = ConfigDict(from_attributes=True)
+AcademicName = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)
+]
+OpenAlexSubfieldId = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        max_length=255,
+        pattern=r"^https://openalex\.org/subfields/[1-9][0-9]*$",
+    ),
+]
+OpenAlexTopicId = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        max_length=255,
+        pattern=r"^https://openalex\.org/T[1-9][0-9]*$",
+    ),
+]
 
 
 class AcademicInfoUpdate(BaseModel):
-    academic_level: Optional[AcademicLevel] = None
-    field_of_study: Optional[FieldOfStudy] = None
-    institution: Optional[str] = Field(None, min_length=2, max_length=255)
-    gpa: Optional[GPA] = None
-    current_study_language: Optional[List[str]] = None
-    expected_graduation_year: Optional[int] = Field(None, ge=1990, le=2035)
+    """Complete section replacement; legacy reads use AcademicInfoResponse."""
+
+    academic_level: AcademicLevel
+    field_of_study: AcademicName = Field(
+        description=(
+            "TAWJIHI: SCIENTIFIC, LITERARY, SHARIA or INDUSTRIAL. "
+            "Otherwise an OpenAlex Subfield display name."
+        )
+    )
+    field_of_study_openalex_id: OpenAlexSubfieldId | None = Field(
+        default=None, description="Required for BACHELOR/MASTER/PHD; must be null for TAWJIHI."
+    )
+    institution: (
+        Annotated[str, StringConstraints(strip_whitespace=True, max_length=255)] | None
+    ) = None
+    gpa: GPA
+    current_study_language: list[AcademicName] = Field(default_factory=list)
+    expected_graduation_year: int = Field(
+        strict=True,
+        description="Inclusive range: runtime current year minus 50 through current year plus 10.",
+    )
+    study_status: StudyStatus
+    target_field_of_study: AcademicName
+    target_field_of_study_openalex_id: OpenAlexSubfieldId | None = Field(
+        default=None,
+        description="Selected OpenAlex Subfield ID; nullable during frontend migration.",
+    )
+    research_specialization: AcademicName | None = None
+    research_specialization_openalex_id: OpenAlexTopicId | None = None
+
+    @field_validator("expected_graduation_year")
+    @classmethod
+    def validate_graduation_year(cls, value: int) -> int:
+        current_year = date.today().year  # noqa: DTZ011 -- contract uses the server's runtime calendar year
+        if not current_year - 50 <= value <= current_year + 10:
+            raise ValueError(
+                f"Graduation year must be between {current_year - 50} and {current_year + 10}."
+            )
+        return value
+
+    @model_validator(mode="after")
+    def validate_academic_fields(self) -> "AcademicInfoUpdate":
+        if self.academic_level == AcademicLevel.TAWJIHI:
+            if self.field_of_study not in {track.value for track in HighSchoolTrack}:
+                raise ValueError(
+                    "TAWJIHI field_of_study must be SCIENTIFIC, LITERARY, SHARIA or INDUSTRIAL."
+                )
+            if self.field_of_study_openalex_id is not None:
+                raise ValueError("TAWJIHI field_of_study_openalex_id must be null.")
+        elif self.field_of_study_openalex_id is None:
+            raise ValueError("field_of_study_openalex_id is required for BACHELOR, MASTER and PHD.")
+
+        has_name = self.research_specialization is not None
+        has_id = self.research_specialization_openalex_id is not None
+        if self.academic_level != AcademicLevel.PHD and (has_name or has_id):
+            raise ValueError("Research specialization is only valid for PHD.")
+        if has_name != has_id:
+            raise ValueError(
+                "Research specialization name and OpenAlex Topic ID must be provided together."
+            )
+        return self
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class AcademicInfoResponse(BaseModel):
+    """Nullable legacy/draft data; no inferred status, taxonomy IDs or target field.
+
+    Runtime year bounds and new required-field rules apply on writes only, so
+    previously saved profiles remain readable as the contract and date change.
+    """
+
+    academic_level: AcademicLevel | None = None
+    field_of_study: str | None = None
+    field_of_study_openalex_id: str | None = None
+    institution: str | None = None
+    gpa: GPA | None = None
+    current_study_language: list[str] = Field(default_factory=list)
+    expected_graduation_year: int | None = None
+    study_status: StudyStatus | None = None
+    target_field_of_study: str | None = None
+    target_field_of_study_openalex_id: str | None = None
+    research_specialization: str | None = None
+    research_specialization_openalex_id: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UploadedFile(BaseModel):
@@ -317,7 +404,7 @@ class UserProfile(BaseModel):
     id: int
     user_id: int
     personal_info: Optional[PersonalInfo] = None        # None = لم يُكمل المستخدم بياناته بعد
-    academic_info: Optional[AcademicInfo] = None        # None = لم يُكمل المستخدم بياناته بعد
+    academic_info: Optional[AcademicInfoResponse] = None
     documents: Optional[Documents] = None
     skills_and_languages: Optional[SkillsAndLanguages] = None
     experiences: List[ExperienceResponse] = []
@@ -330,7 +417,7 @@ class UserProfile(BaseModel):
 
 def calculate_profile_completion(
     personal_info: Optional[PersonalInfo],
-    academic_info: Optional[AcademicInfo],
+    academic_info: Optional[AcademicInfoResponse],
     documents: Documents,
     skills_and_languages: SkillsAndLanguages,
     experiences: List[ExperienceResponse],
@@ -340,7 +427,7 @@ def calculate_profile_completion(
     حساب نسبة اكتمال الملف الشخصي بناءً على الحقول الإلزامية فقط.
     الأقسام الإلزامية الأساسية:
     1. المعلومات الشخصية الإلزامية (الاسم، الإيميل، تاريخ الميلاد، الجنس، الجنسية، بلد الإقامة).
-    2. المعلومات الأكاديمية (المستوى، التخصص، الجامعة/المؤسسة، المعدل).
+    2. المعلومات الأكاديمية المطلوبة وفق عقد الحفظ، دون اشتراط المؤسسة.
     3. التفضيلات الإلزامية (المستوى المرغوب، نوع التمويل).
     """
     total_sections = 3
@@ -361,15 +448,8 @@ def calculate_profile_completion(
             completed_sections += 1
 
     # 2. البيانات الأكاديمية الإلزامية — None يعني لم تُكتب بعد
-    if academic_info is not None:
-        is_academic_complete = all([
-            academic_info.academic_level,
-            academic_info.field_of_study,
-            academic_info.institution,
-            academic_info.gpa and academic_info.gpa.value is not None,
-        ])
-        if is_academic_complete:
-            completed_sections += 1
+    if is_academic_info_complete(academic_info):
+        completed_sections += 1
 
     # 3. التفضيلات الإلزامية
     is_preferences_complete = all([
@@ -380,3 +460,13 @@ def calculate_profile_completion(
         completed_sections += 1
 
     return round((completed_sections / total_sections) * 100, 2)
+
+
+def is_academic_info_complete(academic_info: AcademicInfoResponse | None) -> bool:
+    if academic_info is None:
+        return False
+    try:
+        AcademicInfoUpdate.model_validate(academic_info.model_dump())
+    except ValidationError:
+        return False
+    return True

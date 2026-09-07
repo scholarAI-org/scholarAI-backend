@@ -1,4 +1,3 @@
-from datetime import date
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -18,16 +17,12 @@ from app.schemas.documents import (
     UploadUrlResponse,
 )
 from app.schemas.profile import (
-    AcademicInfo,
-    AcademicLevel,
+    AcademicInfoResponse,
+    AcademicInfoUpdate,
     Documents,
     ExperienceCreate,
     ExperienceResponse,
     ExperienceUpdate,
-    FieldOfStudy,
-    Gender,
-    GPA,
-    GPAScale,
     LanguageItem,
     PersonalInfo,
     PreferencesResponse,
@@ -38,6 +33,7 @@ from app.schemas.profile import (
     UserProfile,
     calculate_profile_completion,
 )
+from app.services.academic_info import academic_info_response
 from app.services.avatar import (
     avatar_presigned_url,
     confirm_avatar_upload,
@@ -82,18 +78,7 @@ def build_full_profile_response(
             passport_number=profile.passport_number,
         )
 
-    # المعلومات الأكاديمية — None إذا لم تُكمل بعد
-    academic_info = None
-    if profile.field_of_study and profile.academic_level and profile.institution:
-        gpa = GPA(value=profile.gpa_value, scale=profile.gpa_scale) if profile.gpa_value is not None and profile.gpa_scale else None
-        academic_info = AcademicInfo(
-            field_of_study=profile.field_of_study,
-            academic_level=profile.academic_level,
-            gpa=gpa,
-            institution=profile.institution,
-            current_study_language=profile.current_study_language or [],
-            expected_graduation_year=profile.expected_graduation_year,
-        )
+    academic_info = academic_info_response(profile)
 
     documents_data = public_documents(profile)
 
@@ -238,33 +223,20 @@ def update_personal_info(
 # ==========================================
 # GET /profile/academic-info
 # ==========================================
-@router.get("/academic-info", response_model=AcademicInfo)
+@router.get("/academic-info", response_model=AcademicInfoResponse | None)
 def get_academic_info(
     db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
 ):
     profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
-    if not profile or not profile.field_of_study:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Academic information not found.",
-        )
-
-    return AcademicInfo(
-        field_of_study=profile.field_of_study,
-        academic_level=profile.academic_level,
-        gpa=GPA(value=profile.gpa_value, scale=profile.gpa_scale) if profile.gpa_value is not None and profile.gpa_scale else None,
-        institution=profile.institution or "",
-        current_study_language=profile.current_study_language or [],
-        expected_graduation_year=profile.expected_graduation_year,
-    )
+    return academic_info_response(profile)
 
 
 # ==========================================
 # PUT /profile/academic-info
 # ==========================================
-@router.put("/academic-info", response_model=AcademicInfo)
+@router.put("/academic-info", response_model=AcademicInfoResponse)
 def update_academic_info(
-    data: AcademicInfo,
+    data: AcademicInfoUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -274,27 +246,15 @@ def update_academic_info(
         profile = Profile(user_id=current_user.id)
         db.add(profile)
 
-    profile.field_of_study = data.field_of_study
-    profile.academic_level = data.academic_level
-    # gpa اختياري — لا تُحدَّث إذا لم يُرسَل
-    if data.gpa is not None:
-        profile.gpa_value = data.gpa.value
-        profile.gpa_scale = data.gpa.scale
-    profile.institution = data.institution
-    profile.current_study_language = data.current_study_language
-    profile.expected_graduation_year = data.expected_graduation_year
+    for name, value in data.model_dump(mode="json", exclude={"gpa"}).items():
+        setattr(profile, name, value)
+    profile.gpa_value = data.gpa.value
+    profile.gpa_scale = data.gpa.scale
 
     db.commit()
     db.refresh(profile)
 
-    return AcademicInfo(
-        field_of_study=profile.field_of_study,
-        academic_level=profile.academic_level,
-        gpa=GPA(value=profile.gpa_value, scale=profile.gpa_scale) if profile.gpa_value is not None and profile.gpa_scale else None,
-        institution=profile.institution,
-        current_study_language=profile.current_study_language or [],
-        expected_graduation_year=profile.expected_graduation_year,
-    )
+    return academic_info_response(profile)
 
 
 # ==========================================
