@@ -62,6 +62,11 @@ DOCUMENT_RULES: dict[ProfileDocumentType, dict[str, Any]] = {
         "max_count": 1,
         "slot": "english_test",
     },
+    ProfileDocumentType.MOTIVATION_LETTER: {
+        "extensions": PDF_TYPES,
+        "max_count": 1,
+        "slot": "motivation_letter",
+    },
 }
 
 UNSAFE_FILENAME_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
@@ -156,6 +161,7 @@ def _empty_documents() -> dict[str, Any]:
         "graduation_certificate": _empty_slot("graduation_certificate"),
         "passport": _empty_slot("passport"),
         "english_test": _empty_slot("english_test"),
+        "motivation_letter": _empty_slot("motivation_letter"),
         "recommendation_letters": [],
     }
 

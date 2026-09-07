@@ -138,7 +138,7 @@ def test_persists_complete_section_and_full_profile_in_fresh_session(api, level)
     full = client.get("/profile")
     assert full.status_code == 200, full.text
     assert full.json()["academic_info"] == result
-    assert full.json()["profile_completion_percentage"] == 33.33
+    assert full.json()["profile_completion_percentage"] == 22.0
 
 
 @pytest.mark.parametrize("track", ["SCIENTIFIC", "LITERARY", "SHARIA", "INDUSTRIAL"])
@@ -480,6 +480,7 @@ def test_completion_excludes_optional_fields_and_requires_target(api):
             "PS",
             "PS",
         )
+        profile.financial_status = "MODERATE"
         profile.desired_degree_level, profile.funding_type = "PHD", "FULL"
         db.commit()
     assert (
@@ -489,11 +490,12 @@ def test_completion_excludes_optional_fields_and_requires_target(api):
         ).status_code
         == 200
     )
-    assert client.get("/profile").json()["profile_completion_percentage"] == 100
+    # Personal required fields: 18; academic: 22; degree/funding: 14.
+    assert client.get("/profile").json()["profile_completion_percentage"] == 54
     with sessions() as db:
         db.query(Profile).filter_by(user_id=user_id).one().target_field_of_study = None
         db.commit()
-    assert client.get("/profile").json()["profile_completion_percentage"] == 66.67
+    assert client.get("/profile").json()["profile_completion_percentage"] == 32
 
 
 def test_academic_endpoints_require_authentication(api):
@@ -501,6 +503,24 @@ def test_academic_endpoints_require_authentication(api):
     del client.headers["Authorization"]
     assert client.get("/profile/academic-info").status_code == 401
     assert client.put("/profile/academic-info", json=payload()).status_code == 401
+
+
+def test_completion_choices_persist_with_academic_contract(api):
+    client, sessions, user_id = api
+    assert client.put("/profile/academic-info", json=payload()).status_code == 200
+    response = client.put("/profile/experiences/status", json={"has_experience": False})
+    assert response.status_code == 200
+    response = client.put("/profile/preferences", json={"open_to_all_countries": True})
+    assert response.status_code == 200
+    with sessions() as db:
+        profile = db.query(Profile).filter_by(user_id=user_id).one()
+        assert profile.has_experience is False
+        assert profile.open_to_all_countries is True
+        assert profile.field_of_study_openalex_id == SUBFIELD_ID
+    full = client.get("/profile").json()
+    assert full["has_experience"] is False
+    assert full["preferences"]["open_to_all_countries"] is True
+    assert full["profile_completion_percentage"] == 33  # Academic 22 + countries 6 + no experience 5.
 
 
 def test_openapi_contract():

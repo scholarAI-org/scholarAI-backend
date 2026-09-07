@@ -74,7 +74,16 @@ same write contract, including required current IDs at university levels. Missin
 status/target prevents completion. Institution and research are optional, and a
 high-school current OpenAlex ID is never required. GPA zero is valid. Completion
 continues to be computed for full-profile reads rather than trusting the existing
-cached database percentage column. No unrelated section scoring was changed.
+cached database percentage column. With the profile-completion feature merged,
+the academic section contributes 22% only when its current contract is complete.
+The remaining weights are personal 22%, preferences 28%, languages 10%,
+experience 5%, skills 5%, and documents 8%. Institution and research do not earn
+or gate points. Legacy academic profiles missing status/target remain readable
+but do not receive academic completion points.
+
+The profile-completion merge also adds revision `20260907_02` for nullable
+`has_experience` and `open_to_all_countries` columns. Apply it before running the
+merged backend; it is verified locally and is not automatically applied to Neon.
 
 ## Persistence and rollout
 
@@ -86,7 +95,7 @@ column. Nullable database fields allow existing records and registration drafts;
 the API enforces the strict complete-section write contract.
 
 Apply `python -m alembic upgrade head` on the deployment database before starting
-the new backend. Verify `alembic current` and `alembic heads` show `20260907_01`.
+the new backend. Verify `alembic current` and `alembic heads` show `20260907_02`.
 Use a direct PostgreSQL connection for Alembic. Schema changes were tested on
 disposable local PostgreSQL databases, then applied to the configured Neon
 database with user approval on 2026-09-07. Revision `20260907_01`, profile columns,

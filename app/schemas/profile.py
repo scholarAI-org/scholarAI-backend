@@ -103,11 +103,11 @@ class PersonalInfo(BaseModel):
     gender: Gender
     nationality: str = Field(..., min_length=2, max_length=2, description="ISO 2-letter country code, e.g. PS")
     country_of_residence: str = Field(..., min_length=2, max_length=2, description="ISO 2-letter country code")
+    financial_status: FinancialStatus
 
     # اختياري مفروض عليه Validation في حال وجوده
     phone_number: Optional[str] = Field(None, pattern=r"^\+?[1-9]\d{7,14}$")
     city: Optional[str] = Field(None, max_length=100)
-    financial_status: Optional[FinancialStatus] = None
     id_number: Optional[str] = Field(None, pattern=r"^\d{9}$", description="Must be exactly 9 digits")
     passport_number: Optional[str] = Field(None, pattern=r"^[A-Z0-9]{6,12}$")
 
@@ -301,6 +301,7 @@ class Documents(BaseModel):
     passport: UploadedFile = Field(default_factory=UploadedFile)
     recommendation_letters: List[UploadedFile] = Field(default_factory=list)
     english_test: UploadedFile = Field(default_factory=UploadedFile)
+    motivation_letter: UploadedFile = Field(default_factory=UploadedFile)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -334,6 +335,8 @@ class Experience(BaseModel):
 
     @model_validator(mode="after")
     def validate_dates(self) -> "Experience":
+        if not self.is_current and self.end_date is None:
+            raise ValueError("تاريخ النهاية إجباري عندما لا تكون الخبرة مستمرة")
         if not self.is_current and self.end_date is not None:
             if self.end_date < self.start_date:
                 raise ValueError("تاريخ النهاية يجب أن يكون بعد تاريخ البداية")
@@ -368,7 +371,13 @@ class Preferences(BaseModel):
     funding_type: FundingType
 
     preferred_fields_of_study: List[str] = []
-    preferred_countries: List[str] = []
+    preferred_countries: Optional[List[str]] = Field(default_factory=list)
+    open_to_all_countries: bool = False
+
+    @field_validator("preferred_countries", mode="before")
+    @classmethod
+    def default_countries(cls, v):
+        return v if v is not None else []
 
 
 class PreferencesUpdate(BaseModel):
@@ -376,6 +385,7 @@ class PreferencesUpdate(BaseModel):
     funding_type: Optional[FundingType] = None
     preferred_fields_of_study: Optional[List[str]] = None
     preferred_countries: Optional[List[str]] = None
+    open_to_all_countries: Optional[bool] = None
 
 
 class PreferencesResponse(BaseModel):
@@ -384,6 +394,7 @@ class PreferencesResponse(BaseModel):
     funding_type: Optional[FundingType] = None
     preferred_fields_of_study: List[str] = []
     preferred_countries: List[str] = []
+    open_to_all_countries: bool = False
     is_profile_completed: bool = False
 
     model_config = ConfigDict(from_attributes=True)
@@ -408,11 +419,17 @@ class UserProfile(BaseModel):
     documents: Optional[Documents] = None
     skills_and_languages: Optional[SkillsAndLanguages] = None
     experiences: List[ExperienceResponse] = []
+    has_experience: Optional[bool] = None
     preferences: Optional[PreferencesResponse] = None
     avatar_url: Optional[str] = None
     profile_completion_percentage: float = 0.0
 
     model_config = ConfigDict(from_attributes=True)
+
+
+def _is_english_language(name: str) -> bool:
+    clean = name.strip().lower()
+    return clean in ["english", "en"] or any(k in clean for k in ["انجليز", "إنجليز"])
 
 
 def calculate_profile_completion(
@@ -422,44 +439,148 @@ def calculate_profile_completion(
     skills_and_languages: SkillsAndLanguages,
     experiences: List[ExperienceResponse],
     preferences: PreferencesResponse,
+    has_experience: Optional[bool] = None,
+    open_to_all_countries: Optional[bool] = None,
 ) -> float:
     """
-    حساب نسبة اكتمال الملف الشخصي بناءً على الحقول الإلزامية فقط.
-    الأقسام الإلزامية الأساسية:
-    1. المعلومات الشخصية الإلزامية (الاسم، الإيميل، تاريخ الميلاد، الجنس، الجنسية، بلد الإقامة).
-    2. المعلومات الأكاديمية المطلوبة وفق عقد الحفظ، دون اشتراط المؤسسة.
-    3. التفضيلات الإلزامية (المستوى المرغوب، نوع التمويل).
+    حساب نسبة اكتمال الملف الشخصي بالأوزان الدقيقة (100%):
+    1. Personal Information (22%):
+       - First name: 1%
+       - Last name: 1%
+       - Date of birth: 4%
+       - Nationality: 5%
+       - Country of residence: 4%
+       - Gender: 1%
+       - Financial situation: 2%
+       - Passport number: 4%
+    2. Academic Information (22%):
+       - Current Education level: 6%
+       - Current/previous field of study: 6%
+       - GPA / academic average: 7%
+       - Graduation / expected graduation year: 3%
+    3. Scholarship Preferences (28%):
+       - Target degree: 8%
+       - Target field: 8%
+       - Preferred countries OR Open to all: 6%
+       - Funding preference: 6%
+    4. Languages (10%):
+       - English proficiency: 7%
+       - Other language information: 3%
+    5. Experience & Activities (5%):
+       - If No: 5%
+       - If Yes and at least 1 valid experience: 5%
+       - Otherwise: 0%
+    6. Skills (5%):
+       - 1 skill: 2%
+       - 2 skills: 4%
+       - 3+ skills: 5%
+    7. Documents (8%):
+       - CV: 2%
+       - Motivation letter: 2%
+       - Language certificate (english_test): 3%
+       - Degree certificate (graduation_certificate): 1%
     """
-    total_sections = 3
-    completed_sections = 0
+    score = 0.0
 
-    # 1. المعلومات الشخصية — None يعني لم تُكتب بعد
+    # 1. Personal Information (22%)
     if personal_info is not None:
-        is_personal_complete = all([
-            personal_info.first_name,
-            personal_info.last_name,
-            personal_info.email,
-            personal_info.birth_date,
-            personal_info.gender,
-            personal_info.nationality,
-            personal_info.country_of_residence,
-        ])
-        if is_personal_complete:
-            completed_sections += 1
+        if personal_info.first_name:
+            score += 1.0
+        if personal_info.last_name:
+            score += 1.0
+        if personal_info.birth_date:
+            score += 4.0
+        if personal_info.nationality:
+            score += 5.0
+        if personal_info.country_of_residence:
+            score += 4.0
+        if personal_info.gender:
+            score += 1.0
+        if personal_info.financial_status:
+            score += 2.0
+        if personal_info.passport_number:
+            score += 4.0
 
-    # 2. البيانات الأكاديمية الإلزامية — None يعني لم تُكتب بعد
+    # 2. Academic Information (22%): honor the required OpenAlex contract.
     if is_academic_info_complete(academic_info):
-        completed_sections += 1
+        if academic_info.academic_level:
+            score += 6.0
+        if academic_info.field_of_study:
+            score += 6.0
+        if academic_info.gpa and academic_info.gpa.value is not None:
+            score += 7.0
+        if academic_info.expected_graduation_year is not None:
+            score += 3.0
 
-    # 3. التفضيلات الإلزامية
-    is_preferences_complete = all([
-        preferences.desired_degree_level,
-        preferences.funding_type,
-    ])
-    if is_preferences_complete:
-        completed_sections += 1
+    # 3. Scholarship Preferences (28%)
+    if preferences is not None:
+        if preferences.desired_degree_level:
+            score += 8.0
+        if preferences.preferred_fields_of_study and len(preferences.preferred_fields_of_study) > 0:
+            score += 8.0
+        # Preferred countries OR Open to all: 6%
+        is_open_to_all = (
+            getattr(preferences, "open_to_all_countries", False)
+            or bool(open_to_all_countries)
+            or any(
+                str(c).strip().upper() in ["ALL", "ANY", "OPEN_TO_ALL"]
+                for c in (preferences.preferred_countries or [])
+            )
+        )
+        has_countries = bool(preferences.preferred_countries and len(preferences.preferred_countries) > 0)
+        if has_countries or is_open_to_all:
+            score += 6.0
+        if preferences.funding_type:
+            score += 6.0
 
-    return round((completed_sections / total_sections) * 100, 2)
+    # 4. Languages (10%)
+    has_english = False
+    has_other_language = False
+    if skills_and_languages and skills_and_languages.languages:
+        for lang in skills_and_languages.languages:
+            if _is_english_language(lang.name):
+                has_english = True
+            else:
+                has_other_language = True
+
+    # Also check if english_test document is uploaded for English proficiency
+    if documents and getattr(documents, "english_test", None):
+        if documents.english_test.status == UploadStatus.UPLOADED:
+            has_english = True
+
+    if has_english:
+        score += 7.0
+    if has_other_language:
+        score += 3.0
+
+    # 5. Experience & Activities (5%)
+    if has_experience is False:
+        score += 5.0
+    elif len(experiences) >= 1:
+        score += 5.0
+
+    # 6. Skills (5%)
+    skills_count = len(skills_and_languages.skills) if (skills_and_languages and skills_and_languages.skills) else 0
+    if skills_count >= 3:
+        score += 5.0
+    elif skills_count == 2:
+        score += 4.0
+    elif skills_count == 1:
+        score += 2.0
+
+    # 7. Documents (8%)
+    if documents:
+        if getattr(documents, "cv", None) and documents.cv.status == UploadStatus.UPLOADED:
+            score += 2.0
+        if getattr(documents, "motivation_letter", None) and documents.motivation_letter.status == UploadStatus.UPLOADED:
+            score += 2.0
+        if getattr(documents, "english_test", None) and documents.english_test.status == UploadStatus.UPLOADED:
+            score += 3.0
+        if getattr(documents, "graduation_certificate", None) and documents.graduation_certificate.status == UploadStatus.UPLOADED:
+            score += 1.0
+
+    return round(score, 2)
+
 
 
 def is_academic_info_complete(academic_info: AcademicInfoResponse | None) -> bool:
