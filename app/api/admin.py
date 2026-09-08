@@ -1,6 +1,6 @@
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -14,11 +14,72 @@ from app.schemas.admin import (
     AdminDashboardStatistics,
     AdminNotificationUnreadCountResponse,
     AdminProfileResponse,
+    AdminRecentPendingScholarship,
+    AdminRecentPendingScholarshipsResponse,
 )
 from app.services.avatar import avatar_presigned_url
 from app.services.s3 import StorageClient, get_s3_storage
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
+
+
+@router.get(
+    "/dashboard/recent-pending-scholarships",
+    response_model=AdminRecentPendingScholarshipsResponse,
+    summary="Get recent pending scholarships",
+    description=(
+        "Returns unreviewed pending listings from the for9a and ministry scrapers, "
+        "newest scraped_at first (unknown dates last), then highest id first. "
+        "Total counts all matching listings before the limit. Requires an authenticated admin."
+    ),
+    responses={
+        401: {"description": "Missing or invalid authentication"},
+        403: {"description": "Requires admin role"},
+    },
+)
+def get_recent_pending_scholarships(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    limit: Annotated[
+        int, Query(ge=1, le=50, description="Maximum listings to return")
+    ] = 10,
+) -> AdminRecentPendingScholarshipsResponse:
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This operation is restricted to administrators.",
+        )
+
+    # The Scholarship model documents these two scraper origins. Review metadata
+    # also excludes listings that were acted on but still have a pending status.
+    pending = db.query(Scholarship).filter(
+        Scholarship.source.in_(("for9a", "ministry")),
+        Scholarship.status == "pending",
+        Scholarship.reviewed_at.is_(None),
+        Scholarship.reviewed_by.is_(None),
+    )
+    total = pending.with_entities(func.count(Scholarship.id)).scalar()
+    rows = (
+        pending.with_entities(
+            Scholarship.id,
+            Scholarship.title,
+            Scholarship.organization_name,
+            Scholarship.country,
+            Scholarship.deadline,
+            Scholarship.no_deadline,
+            Scholarship.source,
+            Scholarship.source_url,
+            Scholarship.status,
+            Scholarship.scraped_at,
+        )
+        .order_by(Scholarship.scraped_at.desc().nulls_last(), Scholarship.id.desc())
+        .limit(limit)
+        .all()
+    )
+    return AdminRecentPendingScholarshipsResponse(
+        items=[AdminRecentPendingScholarship.model_validate(row) for row in rows],
+        total=total,
+    )
 
 
 @router.get(
