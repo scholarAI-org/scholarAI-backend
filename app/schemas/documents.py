@@ -1,6 +1,6 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -12,6 +12,7 @@ class ProfileDocumentType(str, Enum):
     PASSPORT = "passport"
     RECOMMENDATION_LETTER = "recommendation_letter"
     ENGLISH_TEST = "english_test"
+    MOTIVATION_LETTER = "motivation_letter"
 
 
 class UploadUrlRequest(BaseModel):
