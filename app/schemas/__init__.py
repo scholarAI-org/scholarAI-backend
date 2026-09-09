@@ -14,6 +14,7 @@ from app.schemas.profile import (
     PreferencesResponse,
 )
 from app.schemas.Scholarship import (
+    RecommendationScholarshipResponse,
     ScholarshipCreate,
     ScholarshipResponse,
     ScholarshipExistsResponse,
