@@ -372,9 +372,17 @@ def create_document_upload_url(
         file_size=payload.file_size,
     )
     expires_in = settings.S3_PRESIGN_PUT_EXPIRE_SECONDS
-    upload_url = storage.presign_put(
-        session.object_key, session.expected_content_type, expires_in
-    )
+    try:
+        upload_url = storage.presign_put(
+            session.object_key, session.expected_content_type, expires_in
+        )
+    except Exception as exc:
+        db.delete(session)
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="تعذر إنشاء رابط رفع الملف. حاول مرة أخرى لاحقاً.",
+        ) from exc
     return UploadUrlResponse(
         upload_id=session.id,
         upload_url=upload_url,
