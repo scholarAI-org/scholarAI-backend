@@ -12,15 +12,18 @@ class AdminMigrationHistoryTests(unittest.TestCase):
         with warnings.catch_warnings():
             warnings.simplefilter("error", UserWarning)
             script = ScriptDirectory.from_config(Config("alembic.ini"))
-            self.assertEqual(script.get_heads(), ["20260908_admin01"])
+            self.assertEqual(script.get_heads(), ["20260909_01"])
             revisions = list(script.walk_revisions())
         self.assertEqual(
-            [revision.revision for revision in revisions[:3]],
-            ["20260908_admin01", "20260907_02", "20260907_01"],
+            [revision.revision for revision in revisions[:4]],
+            ["20260909_01", "20260908_admin01", "20260907_02", "20260907_01"],
         )
         self.assertEqual(
-            Path(revisions[0].path).name, "20260907_create_admin_notifications_table.py"
+            Path(revisions[0].path).name, "20260909_01_create_audit_logs_table.py"
         )
         self.assertEqual(
-            Path(revisions[2].path).name, "20260907_academic_info_openalex.py"
+            Path(revisions[1].path).name, "20260907_create_admin_notifications_table.py"
+        )
+        self.assertEqual(
+            Path(revisions[3].path).name, "20260907_academic_info_openalex.py"
         )
