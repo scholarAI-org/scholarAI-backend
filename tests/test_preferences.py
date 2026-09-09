@@ -36,7 +36,13 @@ def test_preferences_save_and_aggregate_match_with_shared_openalex_taxonomy(
         profile = db.get(Profile, client.get("/profile").json()["id"])
         assert profile.user_id == user_id
         assert profile.target_field_of_study == data["target_field_of_study"]
+        assert profile.target_field_of_study_openalex_id == data[
+            "target_field_of_study_openalex_id"
+        ]
         assert profile.detailed_specialization == data["detailed_specialization"]
+        assert profile.open_to_all_countries is False
+        assert profile.funding_type == data["funding_type"]
+        assert profile.preferred_countries == data["preferred_countries"]
 
 
 def test_existing_academic_target_is_exposed_only_in_preferences_and_archive_untouched(
@@ -131,6 +137,7 @@ def test_non_phd_specialization_normalizes_to_null_and_partial_phd_update_preser
     "changes",
     [
         {"desired_degree_level": "UNKNOWN"},
+        {"desired_degree_level": "TAWJIHI"},
         {"funding_type": "UNKNOWN"},
         {"target_field_of_study": "   "},
         {"target_field_of_study": 42},

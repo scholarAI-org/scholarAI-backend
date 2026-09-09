@@ -11,6 +11,7 @@ legacy tables so an operator cannot lose user data accidentally.
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+from sqlalchemy.engine import Inspector
 
 from alembic import op
 
@@ -20,7 +21,7 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
-def _inspector() -> sa.Inspector:
+def _inspector() -> Inspector:
     return sa.inspect(op.get_bind())
 
 
