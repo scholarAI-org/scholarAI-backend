@@ -48,6 +48,7 @@ from app.services.documents import (
     delete_document,
     public_documents,
 )
+from app.services.preferences import preferences_response, save_preferences
 from app.services.s3 import StorageClient, get_s3_storage
 
 router = APIRouter(prefix="/profile", tags=["Profile"])
@@ -105,14 +106,7 @@ def build_full_profile_response(
         ExperienceResponse.model_validate(exp) for exp in (profile.experiences or [])
     ]
 
-    preferences_data = PreferencesResponse(
-        desired_degree_level=profile.desired_degree_level,
-        funding_type=profile.funding_type,
-        preferred_fields_of_study=profile.preferred_fields_of_study or [],
-        preferred_countries=profile.preferred_countries or [],
-        open_to_all_countries=bool(profile.open_to_all_countries),
-        is_profile_completed=bool(profile.desired_degree_level and profile.funding_type),
-    )
+    preferences_data = preferences_response(profile)
 
     completion_percentage = calculate_profile_completion(
         personal_info=personal_info,
@@ -667,17 +661,7 @@ def get_preferences(
 ):
     profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
 
-    if not profile:
-        return PreferencesResponse()
-
-    return PreferencesResponse(
-        desired_degree_level=profile.desired_degree_level,
-        funding_type=profile.funding_type,
-        preferred_fields_of_study=profile.preferred_fields_of_study or [],
-        preferred_countries=profile.preferred_countries or [],
-        open_to_all_countries=bool(profile.open_to_all_countries),
-        is_profile_completed=bool(profile.desired_degree_level and profile.funding_type),
-    )
+    return preferences_response(profile)
 
 
 @router.put("/preferences", response_model=PreferencesResponse)
@@ -688,32 +672,8 @@ def update_preferences(
 ):
     profile = db.query(Profile).filter(Profile.user_id == current_user.id).first()
 
-    if not profile:
-        profile = Profile(user_id=current_user.id)
-        db.add(profile)
-
-    if data.desired_degree_level is not None:
-        profile.desired_degree_level = data.desired_degree_level
-    if data.funding_type is not None:
-        profile.funding_type = data.funding_type
-    if data.preferred_fields_of_study is not None:
-        profile.preferred_fields_of_study = data.preferred_fields_of_study
-    if data.preferred_countries is not None:
-        profile.preferred_countries = data.preferred_countries
-    if data.open_to_all_countries is not None:
-        profile.open_to_all_countries = data.open_to_all_countries
-
-    db.commit()
-    db.refresh(profile)
-
-    return PreferencesResponse(
-        desired_degree_level=profile.desired_degree_level,
-        funding_type=profile.funding_type,
-        preferred_fields_of_study=profile.preferred_fields_of_study or [],
-        preferred_countries=profile.preferred_countries or [],
-        open_to_all_countries=bool(profile.open_to_all_countries),
-        is_profile_completed=bool(profile.desired_degree_level and profile.funding_type),
-    )
+    profile = save_preferences(db, current_user.id, profile, data)
+    return preferences_response(profile)
 
 
 # ==========================================

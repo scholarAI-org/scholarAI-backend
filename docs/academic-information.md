@@ -16,15 +16,13 @@ the normalized saved object. It requires the existing Bearer authentication.
   "current_study_language": ["English"],
   "expected_graduation_year": 2027,
   "study_status": "CURRENTLY_STUDYING",
-  "target_field_of_study": "Computer Science Applications",
-  "target_field_of_study_openalex_id": "https://openalex.org/subfields/1706",
   "research_specialization": null,
   "research_specialization_openalex_id": null
 }
 ```
 
 Required on every PUT: `academic_level`, `field_of_study`, `gpa`,
-`expected_graduation_year`, `study_status`, `target_field_of_study`.
+`expected_graduation_year`, `study_status`.
 PUT is not a partial update. Unknown keys return 422 to catch contract mistakes.
 
 - `AcademicLevel` remains `TAWJIHI`, `BACHELOR`, `MASTER`, `PHD`.
@@ -34,11 +32,10 @@ PUT is not a partial update. Unknown keys return 422 to catch contract mistakes.
   `https://openalex.org/subfields/<numeric-id>` ID. The old mixed `FieldOfStudy`
   enum is no longer the schema or storage type.
 - `study_status`: `CURRENTLY_STUDYING` or `GRADUATED`; stored, never inferred.
-- The target name is required at every level. The target Subfield ID is accepted
-  and persisted, but may be null/omitted during frontend migration. No frontend
-  repository was available to confirm full ID persistence rollout. The frontend
-  should send both selected values; making the target ID mandatory is a future
-  coordinated contract change.
+- The future target name and target Subfield ID belong exclusively to
+  [Preferences](preferences.md). Sending either field to Academic Information
+  returns 422. The existing target database columns retain their data and are
+  now read/written by Preferences; academic PUT never clears or updates them.
 - Only PhD accepts research specialization; its name and canonical
   `https://openalex.org/T<numeric-id>` Topic ID must appear together. Omitting
   them in a later PUT clears old values, including when changing academic level.
@@ -71,15 +68,21 @@ academic section returns `200 null` (previously section GET returned 404).
 
 The centralized completion function validates academic completeness against the
 same write contract, including required current IDs at university levels. Missing
-status/target prevents completion. Institution and research are optional, and a
+study status prevents completion. Institution and research are optional, and a
 high-school current OpenAlex ID is never required. GPA zero is valid. Completion
 continues to be computed for full-profile reads rather than trusting the existing
 cached database percentage column. With the profile-completion feature merged,
 the academic section contributes 22% only when its current contract is complete.
 The remaining weights are personal 22%, preferences 28%, languages 10%,
 experience 5%, skills 5%, and documents 8%. Institution and research do not earn
-or gate points. Legacy academic profiles missing status/target remain readable
+or gate points. Legacy academic profiles missing study status remain readable
 but do not receive academic completion points.
+
+The future target is no longer a condition for academic completion. Preferences
+awards the existing target-field 8% using `target_field_of_study`, without
+changing the total weights or counting the field twice. Academic
+`research_specialization` remains the student's current academic research;
+the future PhD `detailed_specialization` is separate and belongs to Preferences.
 
 The profile-completion merge also adds revision `20260907_02` for nullable
 `has_experience` and `open_to_all_countries` columns. Apply it before running the

@@ -28,14 +28,12 @@ REQUIRED_FIELDS = (
     "gpa",
     "expected_graduation_year",
     "study_status",
-    "target_field_of_study",
 )
 ALL_FIELDS = {
     *REQUIRED_FIELDS,
     "field_of_study_openalex_id",
     "institution",
     "current_study_language",
-    "target_field_of_study_openalex_id",
     "research_specialization",
     "research_specialization_openalex_id",
 }
@@ -58,8 +56,6 @@ def payload(level="BACHELOR", **changes):
         "gpa": {"value": 3.4, "scale": "SCALE_4"},
         "expected_graduation_year": current_year() + 1,
         "study_status": "CURRENTLY_STUDYING",
-        "target_field_of_study": "Artificial Intelligence",
-        "target_field_of_study_openalex_id": TARGET_ID,
     }
     return data | changes
 
@@ -224,7 +220,6 @@ def test_optional_institution_and_name_normalization(api, institution):
         json=payload(
             institution=institution,
             field_of_study="  Software Engineering  ",
-            target_field_of_study="  Artificial Intelligence  ",
         ),
     )
     assert response.status_code == 200
@@ -232,7 +227,6 @@ def test_optional_institution_and_name_normalization(api, institution):
         institution.strip() if institution is not None else None
     )
     assert response.json()["field_of_study"] == "Software Engineering"
-    assert response.json()["target_field_of_study"] == "Artificial Intelligence"
 
 
 @pytest.mark.parametrize("status", ["CURRENTLY_STUDYING", "GRADUATED"])
@@ -242,12 +236,21 @@ def test_study_status_persists(api, status):
     assert api[0].get("/profile").json()["academic_info"]["study_status"] == status
 
 
-def test_target_id_nullable_for_frontend_transition(api):
-    data = payload()
-    del data["target_field_of_study_openalex_id"]
-    response = api[0].put("/profile/academic-info", json=data)
-    assert response.status_code == 200
-    assert response.json()["target_field_of_study_openalex_id"] is None
+@pytest.mark.parametrize(
+    "removed_field,value",
+    [
+        ("target_field_of_study", "Artificial Intelligence"),
+        ("target_field_of_study_openalex_id", TARGET_ID),
+    ],
+)
+def test_academic_rejects_target_fields_now_owned_by_preferences(
+    api, removed_field, value
+):
+    response = api[0].put(
+        "/profile/academic-info", json=payload(**{removed_field: value})
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["type"] == "extra_forbidden"
 
 
 @pytest.mark.parametrize(
@@ -437,7 +440,7 @@ def test_legacy_data_preserved_and_not_counted_as_complete(api, legacy_field):
     assert section.status_code == full.status_code == 200
     assert section.json()["field_of_study"] == legacy_field
     assert section.json()["study_status"] is None
-    assert section.json()["target_field_of_study"] is None
+    assert "target_field_of_study" not in section.json()
     assert full.json()["academic_info"] == section.json()
     assert full.json()["profile_completion_percentage"] == 0
 
@@ -464,12 +467,12 @@ def test_missing_profile_can_save_first_academic_section(api):
     assert client.get("/profile/academic-info").json() is None
     assert client.put("/profile/academic-info", json=payload()).status_code == 200
     assert (
-        client.get("/profile").json()["academic_info"]["target_field_of_study"]
-        == payload()["target_field_of_study"]
+        client.get("/profile").json()["academic_info"]["field_of_study"]
+        == payload()["field_of_study"]
     )
 
 
-def test_completion_excludes_optional_fields_and_requires_target(api):
+def test_academic_completion_is_independent_of_preferences_target(api):
     client, sessions, user_id = api
     with sessions() as db:
         profile = db.query(Profile).filter_by(user_id=user_id).one()
@@ -495,7 +498,13 @@ def test_completion_excludes_optional_fields_and_requires_target(api):
     with sessions() as db:
         db.query(Profile).filter_by(user_id=user_id).one().target_field_of_study = None
         db.commit()
-    assert client.get("/profile").json()["profile_completion_percentage"] == 32
+    assert client.get("/profile").json()["profile_completion_percentage"] == 54
+    with sessions() as db:
+        db.query(Profile).filter_by(
+            user_id=user_id
+        ).one().target_field_of_study = "Artificial Intelligence"
+        db.commit()
+    assert client.get("/profile").json()["profile_completion_percentage"] == 62
 
 
 def test_academic_endpoints_require_authentication(api):
@@ -520,7 +529,9 @@ def test_completion_choices_persist_with_academic_contract(api):
     full = client.get("/profile").json()
     assert full["has_experience"] is False
     assert full["preferences"]["open_to_all_countries"] is True
-    assert full["profile_completion_percentage"] == 33  # Academic 22 + countries 6 + no experience 5.
+    assert (
+        full["profile_completion_percentage"] == 33
+    )  # Academic 22 + countries 6 + no experience 5.
 
 
 def test_openapi_contract():
