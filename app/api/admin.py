@@ -8,6 +8,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models import Scholarship
 from app.models.admin_notification import AdminNotification
+from app.models.audit_log import AuditLog
 from app.models.profile import Profile
 from app.models.user import User
 from app.schemas.admin import (
@@ -16,6 +17,8 @@ from app.schemas.admin import (
     AdminProfileResponse,
     AdminRecentPendingScholarship,
     AdminRecentPendingScholarshipsResponse,
+    AuditLogItem,
+    DashboardAuditLogsResponse,
 )
 from app.services.avatar import avatar_presigned_url
 from app.services.s3 import StorageClient, get_s3_storage
@@ -205,4 +208,61 @@ def get_current_admin_profile(
         email=current_user.email,
         role=current_user.role,
         avatar_url=avatar_url,
+    )
+
+
+@router.get(
+    "/dashboard/audit-logs",
+    response_model=DashboardAuditLogsResponse,
+    summary="Get dashboard audit logs",
+    description=(
+        "Returns recent administrative audit logs (publish, edit, delete operations) "
+        "ordered by newest first. Supports pagination and action filtering. "
+        "Requires an authenticated admin."
+    ),
+    responses={
+        401: {"description": "Missing or invalid authentication"},
+        403: {"description": "Requires admin role"},
+    },
+)
+@router.get(
+    "/audit-logs",
+    response_model=DashboardAuditLogsResponse,
+    include_in_schema=False,
+)
+def get_dashboard_audit_logs(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    limit: Annotated[
+        int, Query(ge=1, le=100, description="Maximum number of audit logs to return")
+    ] = 10,
+    offset: Annotated[
+        int, Query(ge=0, description="Number of audit logs to skip")
+    ] = 0,
+    action: Annotated[
+        Optional[str],
+        Query(description="Filter by action type (publish, edit, delete)"),
+    ] = None,
+) -> DashboardAuditLogsResponse:
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This operation is restricted to administrators.",
+        )
+
+    query = db.query(AuditLog)
+    if action:
+        query = query.filter(AuditLog.action == action.lower())
+
+    total = query.with_entities(func.count(AuditLog.id)).scalar() or 0
+    logs = (
+        query.order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+    return DashboardAuditLogsResponse(
+        items=[AuditLogItem.model_validate(log) for log in logs],
+        total=total,
     )

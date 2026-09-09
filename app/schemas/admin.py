@@ -44,3 +44,23 @@ class AdminProfileResponse(BaseModel):
     avatar_url: Optional[str] = Field(
         None, description="رابط الصورة الشخصية أو null في حال عدم وجودها"
     )
+
+
+class AuditLogItem(BaseModel):
+    id: int = Field(..., description="معرف سجل التدقيق")
+    admin_id: Optional[int] = Field(None, description="معرف الأدمن الذي قام بالعملية")
+    admin_name: str = Field(..., description="اسم الأدمن الذي قام بالعملية")
+    action: str = Field(..., description="نوع العملية (publish, edit, delete)")
+    action_display: str = Field(..., description="اسم العملية المعروض (اعتماد ونشر، تعديل، حذف)")
+    entity_type: str = Field("scholarship", description="نوع الكيان المعني")
+    entity_id: Optional[int] = Field(None, description="معرف الكيان المعني")
+    entity_name: str = Field(..., description="اسم الكيان أو المنحة")
+    details: Optional[dict] = Field(None, description="تفاصيل إضافية عن العملية")
+    created_at: datetime = Field(..., description="تاريخ ووقت تنفيذ العملية")
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DashboardAuditLogsResponse(BaseModel):
+    items: list[AuditLogItem] = Field(..., description="قائمة سجلات التدقيق")
+    total: int = Field(ge=0, description="إجمالي عدد السجلات المطابقة")

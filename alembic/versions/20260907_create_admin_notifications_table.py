@@ -21,36 +21,41 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.create_table(
-        "admin_notifications",
-        sa.Column("id", sa.Integer(), nullable=False),
-        sa.Column("title", sa.String(length=255), nullable=False),
-        sa.Column("message", sa.Text(), nullable=False),
-        sa.Column(
-            "notification_type",
-            sa.String(length=50),
-            nullable=False,
-            server_default="general",
-        ),
-        sa.Column("is_read", sa.Boolean(), nullable=False, server_default=sa.false()),
-        sa.Column(
-            "created_at",
-            sa.DateTime(timezone=True),
-            server_default=sa.func.now(),
-            nullable=False,
-        ),
-        sa.Column("read_at", sa.DateTime(timezone=True), nullable=True),
-        sa.PrimaryKeyConstraint("id"),
-    )
-    op.create_index(
-        "ix_admin_notifications_id", "admin_notifications", ["id"], unique=False
-    )
-    op.create_index(
-        "ix_admin_notifications_is_read",
-        "admin_notifications",
-        ["is_read"],
-        unique=False,
-    )
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    tables = inspector.get_table_names()
+
+    if "admin_notifications" not in tables:
+        op.create_table(
+            "admin_notifications",
+            sa.Column("id", sa.Integer(), nullable=False),
+            sa.Column("title", sa.String(length=255), nullable=False),
+            sa.Column("message", sa.Text(), nullable=False),
+            sa.Column(
+                "notification_type",
+                sa.String(length=50),
+                nullable=False,
+                server_default="general",
+            ),
+            sa.Column("is_read", sa.Boolean(), nullable=False, server_default=sa.false()),
+            sa.Column(
+                "created_at",
+                sa.DateTime(timezone=True),
+                server_default=sa.func.now(),
+                nullable=False,
+            ),
+            sa.Column("read_at", sa.DateTime(timezone=True), nullable=True),
+            sa.PrimaryKeyConstraint("id"),
+        )
+        op.create_index(
+            "ix_admin_notifications_id", "admin_notifications", ["id"], unique=False
+        )
+        op.create_index(
+            "ix_admin_notifications_is_read",
+            "admin_notifications",
+            ["is_read"],
+            unique=False,
+        )
 
 
 def downgrade() -> None:
