@@ -3,6 +3,8 @@ import subprocess
 import sys
 
 import pytest
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, text
 
 MIGRATION_DATABASE = os.getenv("ACADEMIC_MIGRATION_TEST_DATABASE_URL")
@@ -90,7 +92,7 @@ def test_upgrade_preserves_legacy_data_and_downgrade_protects_new_values():
                 connection.execute(
                     text("SELECT version_num FROM alembic_version")
                 ).scalar_one()
-                == "20260907_02"
+                == ScriptDirectory.from_config(Config("alembic.ini")).get_current_head()
             )
             assert (
                 connection.execute(

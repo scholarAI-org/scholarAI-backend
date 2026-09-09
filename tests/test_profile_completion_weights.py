@@ -71,7 +71,6 @@ class ProfileCompletionWeightsTests(unittest.TestCase):
             field_of_study="Computer Science",
             field_of_study_openalex_id="https://openalex.org/subfields/1702",
             study_status="CURRENTLY_STUDYING",
-            target_field_of_study="Artificial Intelligence",
             gpa=GPA(value=3.9, scale=GPAScale.SCALE_4),
             expected_graduation_year=2026,
             institution=None,  # optional, does not affect 22%
@@ -91,7 +90,7 @@ class ProfileCompletionWeightsTests(unittest.TestCase):
         preferences = PreferencesResponse(
             desired_degree_level=DesiredDegreeLevel.MASTER,
             funding_type=FundingType.FULL,
-            preferred_fields_of_study=["AI", "Data Science"],
+            target_field_of_study="AI",
             preferred_countries=["TR", "MY"],
             open_to_all_countries=False,
         )
@@ -109,7 +108,7 @@ class ProfileCompletionWeightsTests(unittest.TestCase):
         preferences_open = PreferencesResponse(
             desired_degree_level=DesiredDegreeLevel.MASTER,
             funding_type=FundingType.FULL,
-            preferred_fields_of_study=["AI"],
+            target_field_of_study="AI",
             preferred_countries=[],
             open_to_all_countries=True,
         )
@@ -274,14 +273,13 @@ class ProfileCompletionWeightsTests(unittest.TestCase):
             field_of_study="Computer Science",
             field_of_study_openalex_id="https://openalex.org/subfields/1702",
             study_status="CURRENTLY_STUDYING",
-            target_field_of_study="Artificial Intelligence",
             gpa=GPA(value=3.9, scale=GPAScale.SCALE_4),
             expected_graduation_year=2026,
         )  # 22%
         preferences = PreferencesResponse(
             desired_degree_level=DesiredDegreeLevel.MASTER,
             funding_type=FundingType.FULL,
-            preferred_fields_of_study=["Computer Science"],
+            target_field_of_study="Computer Science",
             preferred_countries=["DE"],
         )  # 28%
         skills_langs = SkillsAndLanguages(

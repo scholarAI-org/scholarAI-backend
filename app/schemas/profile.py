@@ -210,11 +210,6 @@ class AcademicInfoUpdate(BaseModel):
         description="Inclusive range: runtime current year minus 50 through current year plus 10.",
     )
     study_status: StudyStatus
-    target_field_of_study: AcademicName
-    target_field_of_study_openalex_id: OpenAlexSubfieldId | None = Field(
-        default=None,
-        description="Selected OpenAlex Subfield ID; nullable during frontend migration.",
-    )
     research_specialization: AcademicName | None = None
     research_specialization_openalex_id: OpenAlexTopicId | None = None
 
@@ -254,7 +249,7 @@ class AcademicInfoUpdate(BaseModel):
 
 
 class AcademicInfoResponse(BaseModel):
-    """Nullable legacy/draft data; no inferred status, taxonomy IDs or target field.
+    """Nullable legacy/draft academic data; no inferred status or taxonomy IDs.
 
     Runtime year bounds and new required-field rules apply on writes only, so
     previously saved profiles remain readable as the contract and date change.
@@ -268,8 +263,6 @@ class AcademicInfoResponse(BaseModel):
     current_study_language: list[str] = Field(default_factory=list)
     expected_graduation_year: int | None = None
     study_status: StudyStatus | None = None
-    target_field_of_study: str | None = None
-    target_field_of_study_openalex_id: str | None = None
     research_specialization: str | None = None
     research_specialization_openalex_id: str | None = None
 
@@ -366,33 +359,79 @@ class ExperienceResponse(Experience):
 # ==========================================
 # 4. Preferences Schemas
 # ==========================================
-class Preferences(BaseModel):
-    desired_degree_level: DesiredDegreeLevel
-    funding_type: FundingType
+CountryCode = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, pattern=r"^[A-Za-z]{2}$", to_upper=True),
+]
 
-    preferred_fields_of_study: List[str] = []
-    preferred_countries: Optional[List[str]] = Field(default_factory=list)
+
+class PreferencesState(BaseModel):
+    """Validate the merged preference state, including partial/draft profiles."""
+
+    desired_degree_level: DesiredDegreeLevel | None = None
+    target_field_of_study: AcademicName | None = None
+    target_field_of_study_openalex_id: OpenAlexSubfieldId | None = Field(
+        default=None,
+        description="Optional OpenAlex Subfield ID. The same taxonomy is valid for all degrees.",
+    )
+    detailed_specialization: AcademicName | None = None
+    funding_type: FundingType | None = None
+    preferred_countries: list[CountryCode] = Field(default_factory=list)
     open_to_all_countries: bool = False
 
     @field_validator("preferred_countries", mode="before")
     @classmethod
-    def default_countries(cls, v):
-        return v if v is not None else []
+    def default_countries(cls, value):
+        return value if value is not None else []
+
+    @model_validator(mode="after")
+    def validate_preferences(self) -> "PreferencesState":
+        if self.target_field_of_study_openalex_id and not self.target_field_of_study:
+            raise ValueError("target_field_of_study is required with its OpenAlex ID.")
+        if self.desired_degree_level == DesiredDegreeLevel.PHD:
+            if not self.detailed_specialization:
+                raise ValueError("detailed_specialization is required for PHD.")
+        else:
+            self.detailed_specialization = None
+        if self.open_to_all_countries:
+            self.preferred_countries = []
+        return self
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class Preferences(PreferencesState):
+    desired_degree_level: DesiredDegreeLevel
+    funding_type: FundingType
 
 
 class PreferencesUpdate(BaseModel):
+    """Partial update; degree-dependent rules validate the merged stored state."""
+
     desired_degree_level: Optional[DesiredDegreeLevel] = None
     funding_type: Optional[FundingType] = None
-    preferred_fields_of_study: Optional[List[str]] = None
-    preferred_countries: Optional[List[str]] = None
+    target_field_of_study: AcademicName | None = Field(
+        default=None, description="One intended OpenAlex field; shared taxonomy for all degrees."
+    )
+    target_field_of_study_openalex_id: OpenAlexSubfieldId | None = Field(
+        default=None, description="Optional OpenAlex Subfield ID for the intended field."
+    )
+    detailed_specialization: AcademicName | None = Field(
+        default=None, description="Required when the resulting degree is PHD; otherwise cleared."
+    )
+    preferred_countries: list[CountryCode] | None = None
     open_to_all_countries: Optional[bool] = None
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class PreferencesResponse(BaseModel):
     """Response schema — جميع الحقول Optional لأن المستخدم الجديد لم يُكمل تفضيلاته بعد."""
     desired_degree_level: Optional[DesiredDegreeLevel] = None
     funding_type: Optional[FundingType] = None
-    preferred_fields_of_study: List[str] = []
+    target_field_of_study: str | None = None
+    target_field_of_study_openalex_id: str | None = None
+    detailed_specialization: str | None = None
     preferred_countries: List[str] = []
     open_to_all_countries: bool = False
     is_profile_completed: bool = False
@@ -516,7 +555,7 @@ def calculate_profile_completion(
     if preferences is not None:
         if preferences.desired_degree_level:
             score += 8.0
-        if preferences.preferred_fields_of_study and len(preferences.preferred_fields_of_study) > 0:
+        if preferences.target_field_of_study and preferences.target_field_of_study.strip():
             score += 8.0
         # Preferred countries OR Open to all: 6%
         is_open_to_all = (

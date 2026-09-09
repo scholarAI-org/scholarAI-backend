@@ -42,7 +42,6 @@ class ProfileApiEndpointsTests(unittest.TestCase):
             "field_of_study": "Computer Science",
             "field_of_study_openalex_id": "https://openalex.org/subfields/1702",
             "study_status": "CURRENTLY_STUDYING",
-            "target_field_of_study": "Artificial Intelligence",
             "gpa": {"value": 3.75, "scale": GPAScale.SCALE_4.value},
             "expected_graduation_year": 2026,
             "current_study_language": ["English"],
@@ -61,7 +60,6 @@ class ProfileApiEndpointsTests(unittest.TestCase):
             "field_of_study": "Computer Science",
             "field_of_study_openalex_id": "https://openalex.org/subfields/1702",
             "study_status": "CURRENTLY_STUDYING",
-            "target_field_of_study": "Artificial Intelligence",
             "expected_graduation_year": 2026,
         }
         response = self.client.put("/profile/academic-info", json=payload)
@@ -73,7 +71,6 @@ class ProfileApiEndpointsTests(unittest.TestCase):
             "field_of_study": "Computer Science",
             "field_of_study_openalex_id": "https://openalex.org/subfields/1702",
             "study_status": "CURRENTLY_STUDYING",
-            "target_field_of_study": "Artificial Intelligence",
             "gpa": {"value": 3.75, "scale": GPAScale.SCALE_4.value},
         }
         response = self.client.put("/profile/academic-info", json=payload)
