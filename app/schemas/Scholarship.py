@@ -72,6 +72,21 @@ class ScholarshipResponse(ScholarshipBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+class RecommendationScholarshipResponse(BaseModel):
+    id: int
+    title: str
+    slug: Optional[str] = None
+    country: Optional[str] = None
+    deadline: Optional[date] = None
+    description: Optional[str] = Field(
+        default=None, description="Full description HTML from the source."
+    )
+    apply_link: Optional[str] = None
+    status: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ScholarshipStatusDistribution(BaseModel):
     published: int = 0
     pending: int = 0

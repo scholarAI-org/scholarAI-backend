@@ -9,6 +9,7 @@ from app.core.security import get_current_user
 from app.models import Scholarship
 from app.models.user import User
 from app.schemas import (
+    RecommendationScholarshipResponse,
     ScholarshipCreate,
     ScholarshipExistsResponse,
     ScholarshipResponse,
@@ -22,6 +23,33 @@ SCHOLARSHIP_DISTRIBUTION_STATUS_MAP = {
     "pending": "pending",
     "rejected": "rejected",
 }
+
+
+@router.get(
+    "/recommendations",
+    response_model=list[RecommendationScholarshipResponse],
+    summary="Get scholarships for the recommendation system",
+    description=(
+        "Public feed of all scholarships, ordered by ID, regardless of status. "
+        "Each listing retains its stored status. "
+        "The description field contains the source description HTML."
+    ),
+)
+def get_recommendation_scholarships(db: Session = Depends(get_db)):
+    return (
+        db.query(
+            Scholarship.id,
+            Scholarship.title,
+            Scholarship.slug,
+            Scholarship.country,
+            Scholarship.deadline,
+            Scholarship.description_html.label("description"),
+            Scholarship.apply_link,
+            Scholarship.status,
+        )
+        .order_by(Scholarship.id.asc())
+        .all()
+    )
 
 
 @router.get(
