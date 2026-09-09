@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import unicodedata
 import uuid
@@ -24,11 +25,17 @@ from app.schemas.profile import Documents, UploadStatus
 from app.services.s3 import StorageClient
 
 # HeadObject checks stored object metadata only, not file bytes.
-# Magic-byte inspection / malware scanning can be added later as an async
-# worker or Lambda that reads the object after confirm, without changing
-# the upload-url / confirm contract.
+# Future content inspection must gate acceptance (e.g. a quarantine worker),
+# rather than treating client-controlled MIME metadata as proof of format.
+
+logger = logging.getLogger(__name__)
 
 PDF_TYPES = {".pdf": {"application/pdf"}}
+DOCX_TYPES = {
+    ".docx": {
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    }
+}
 IMAGE_TYPES = {
     ".jpg": {"image/jpeg"},
     ".jpeg": {"image/jpeg"},
@@ -36,31 +43,41 @@ IMAGE_TYPES = {
 }
 
 DOCUMENT_RULES: dict[ProfileDocumentType, dict[str, Any]] = {
-    ProfileDocumentType.CV: {"extensions": PDF_TYPES, "max_count": 1, "slot": "cv"},
+    ProfileDocumentType.CV: {
+        "extensions": {**PDF_TYPES, **DOCX_TYPES},
+        "max_bytes": 5 * 1024 * 1024,
+        "max_count": 1,
+        "slot": "cv",
+    },
     ProfileDocumentType.TRANSCRIPT: {
         "extensions": PDF_TYPES,
         "max_count": 1,
         "slot": "transcript",
+        "max_bytes": 10 * 1024 * 1024,
     },
     ProfileDocumentType.GRADUATION_CERTIFICATE: {
-        "extensions": PDF_TYPES,
+        "extensions": {**PDF_TYPES, **IMAGE_TYPES},
         "max_count": 1,
         "slot": "graduation_certificate",
+        "max_bytes": 10 * 1024 * 1024,
     },
     ProfileDocumentType.PASSPORT: {
         "extensions": {**PDF_TYPES, **IMAGE_TYPES},
         "max_count": 1,
         "slot": "passport",
+        "max_bytes": 5 * 1024 * 1024,
     },
     ProfileDocumentType.RECOMMENDATION_LETTER: {
-        "extensions": PDF_TYPES,
+        "extensions": {**PDF_TYPES, **DOCX_TYPES},
         "max_count": None,
         "slot": "recommendation_letters",
+        "max_bytes": 5 * 1024 * 1024,
     },
     ProfileDocumentType.ENGLISH_TEST: {
         "extensions": {**PDF_TYPES, **IMAGE_TYPES},
         "max_count": 1,
         "slot": "english_test",
+        "max_bytes": 5 * 1024 * 1024,
     },
     ProfileDocumentType.MOTIVATION_LETTER: {
         "extensions": PDF_TYPES,
@@ -111,8 +128,20 @@ def validate_upload_intent(
     content_type: str,
     file_size: int,
 ) -> tuple[str, str, str]:
-    rules = DOCUMENT_RULES[document_type]
-    extension = _extension_for(file_name)
+    try:
+        rules = DOCUMENT_RULES[ProfileDocumentType(document_type)]
+    except (ValueError, KeyError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="نوع الوثيقة غير مدعوم.",
+        ) from None
+    safe_name = sanitize_file_name(file_name)
+    extension = _extension_for(safe_name)
+    if extension != _extension_for(file_name):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="امتداد الملف غير صالح بعد تنظيف الاسم.",
+        )
     allowed = rules["extensions"]
     if extension not in allowed:
         raise HTTPException(
@@ -128,13 +157,18 @@ def validate_upload_intent(
         )
 
     max_bytes = int(rules.get("max_bytes") or settings.S3_MAX_FILE_BYTES)
+    if isinstance(file_size, bool) or not isinstance(file_size, int) or file_size <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="حجم الملف يجب أن يكون عدداً صحيحاً موجباً.",
+        )
     if file_size > max_bytes:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="حجم الملف يتجاوز الحد المسموح.",
+            detail=f"حجم الملف يتجاوز الحد المسموح وهو {max_bytes / (1024 * 1024):g} MB.",
         )
 
-    return sanitize_file_name(file_name), extension, normalized_type
+    return safe_name, extension, normalized_type
 
 
 def _json_clone(value: Any) -> Any:
@@ -349,6 +383,20 @@ def persist_confirmed_document(
     return data, record, previous_key
 
 
+def _reject_uploaded_object(
+    db: Session,
+    storage: StorageClient,
+    session: DocumentUploadSession,
+) -> None:
+    """Invalidate the owned session and attempt cleanup without masking the 4xx."""
+    session.status = DocumentUploadSessionStatus.FAILED.value
+    db.commit()
+    try:
+        storage.delete_object(session.object_key)
+    except Exception:  # noqa: BLE001 - cleanup must not replace the validation error
+        logger.warning("Rejected document cleanup failed; upload_id=%s", session.id)
+
+
 def confirm_upload_session(
     db: Session,
     user: User,
@@ -358,6 +406,7 @@ def confirm_upload_session(
     session = (
         db.query(DocumentUploadSession)
         .filter(DocumentUploadSession.id == upload_id)
+        .with_for_update()
         .first()
     )
     if session is None:
@@ -391,7 +440,22 @@ def confirm_upload_session(
             detail="انتهت صلاحية جلسة الرفع.",
         )
 
-    head = storage.head_object(session.object_key)
+    # The confirm request supplies only an upload ID. The owned session is the
+    # sole source of the document type, expected metadata and storage key.
+    try:
+        document_type = ProfileDocumentType(session.document_type)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="نوع الوثيقة غير مدعوم.",
+        ) from None
+    try:
+        head = storage.head_object(session.object_key)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="تعذر التحقق من الملف المرفوع. حاول مرة أخرى لاحقاً.",
+        ) from exc
     if not head.exists:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -399,17 +463,26 @@ def confirm_upload_session(
         )
 
     actual_type = _normalize_content_type(head.content_type or "")
+    try:
+        # Reapply current policy, including for sessions issued before a rule change.
+        validate_upload_intent(
+            document_type,
+            session.original_file_name,
+            actual_type,
+            head.content_length,
+        )
+    except HTTPException:
+        _reject_uploaded_object(db, storage, session)
+        raise
     if actual_type != session.expected_content_type:
-        session.status = DocumentUploadSessionStatus.FAILED.value
-        db.commit()
+        _reject_uploaded_object(db, storage, session)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="نوع الملف المرفوع لا يطابق النوع المتوقع.",
         )
 
     if head.content_length != session.expected_file_size:
-        session.status = DocumentUploadSessionStatus.FAILED.value
-        db.commit()
+        _reject_uploaded_object(db, storage, session)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="حجم الملف المرفوع لا يطابق الحجم المتوقع.",
@@ -421,8 +494,7 @@ def confirm_upload_session(
         max_letters = settings.S3_MAX_RECOMMENDATION_LETTERS
         current = len(data.get("recommendation_letters") or [])
         if current >= max_letters:
-            session.status = DocumentUploadSessionStatus.FAILED.value
-            db.commit()
+            _reject_uploaded_object(db, storage, session)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"لا يمكن رفع أكثر من {max_letters} خطابات توصية.",

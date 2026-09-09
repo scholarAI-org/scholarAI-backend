@@ -2,6 +2,7 @@ import os
 import unittest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from unittest.mock import patch
 
 os.environ["DATABASE_URL"] = "sqlite://"
 os.environ.setdefault("SECRET_KEY", "document-upload-test-key")
@@ -24,6 +25,9 @@ from app.models.document_upload import (
 from app.models.profile import Experience, Profile
 from app.models.user import User
 from app.services.s3 import ObjectHead, generate_object_key, get_s3_storage
+
+DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+MB = 1024 * 1024
 
 
 class FakeS3:
@@ -185,6 +189,7 @@ class DocumentUploadTests(unittest.TestCase):
 
     def test_unauthenticated_requests_rejected(self):
         cases = [
+            ("get", "/profile/documents", None),
             ("post", "/profile/documents/upload-url", {"document_type": "cv", "file_name": "cv.pdf", "content_type": "application/pdf", "file_size": 1}),
             ("post", "/profile/documents/confirm", {"upload_id": "x"}),
             ("get", "/profile/documents/doc/download-url", None),
@@ -201,7 +206,7 @@ class DocumentUploadTests(unittest.TestCase):
             dict(document_type="resume", file_name="cv.pdf", content_type="application/pdf", file_size=10),
             dict(document_type="cv", file_name="cv.exe", content_type="application/pdf", file_size=10),
             dict(document_type="cv", file_name="cv.pdf", content_type="image/png", file_size=10),
-            dict(document_type="cv", file_name="cv.pdf", content_type="application/pdf", file_size=settings.S3_MAX_FILE_BYTES + 1),
+            dict(document_type="cv", file_name="cv.pdf", content_type="application/pdf", file_size=5 * MB + 1),
         ]
         for payload in invalid:
             with self.subTest(payload=payload):
@@ -503,6 +508,221 @@ class DocumentUploadTests(unittest.TestCase):
             profile["documents"]["cv"].get("file_url"),
             "https://evil.example/cv.pdf",
         )
+
+    def test_allowed_formats_complete_upload_at_size_limit(self):
+        cases = [
+            ("cv", "PDF", "application/pdf", 5),
+            ("cv", "docx", DOCX_MIME, 5),
+            ("transcript", "pdf", "application/pdf", 10),
+            ("graduation_certificate", "pdf", "application/pdf", 10),
+            ("graduation_certificate", "jpg", "image/jpeg", 10),
+            ("graduation_certificate", "jpeg", "image/jpeg", 10),
+            ("graduation_certificate", "png", "image/png", 10),
+            ("passport", "pdf", "application/pdf", 5),
+            ("passport", "jpg", "image/jpeg", 5),
+            ("passport", "jpeg", "image/jpeg", 5),
+            ("passport", "png", "image/png", 5),
+            ("recommendation_letter", "pdf", "application/pdf", 5),
+            ("recommendation_letter", "docx", DOCX_MIME, 5),
+            ("english_test", "pdf", "application/pdf", 5),
+            ("english_test", "jpg", "image/jpeg", 5),
+            ("english_test", "jpeg", "image/jpeg", 5),
+            ("english_test", "png", "image/png", 5),
+        ]
+        for document_type, extension, mime, max_mb in cases:
+            with self.subTest(document_type=document_type, extension=extension):
+                upload_id, session, body = self._upload_and_store(
+                    document_type, f"FILE.{extension}", mime, max_mb * MB
+                )
+                self.assertTrue(session.object_key.endswith(f".{extension.lower()}"))
+                self.assertEqual(body["headers"], {"Content-Type": mime})
+                response = self.client.post(
+                    "/profile/documents/confirm", json={"upload_id": upload_id}
+                )
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(response.json()["file_size"], max_mb * MB)
+                self.assertEqual(response.json()["content_type"], mime)
+
+    def test_invalid_metadata_has_no_session_key_or_presign_side_effects(self):
+        cases = [
+            ("cv", "cv.pdf", "application/pdf", 5 * MB + 1),
+            ("transcript", "transcript.pdf", "application/pdf", 10 * MB + 1),
+            ("graduation_certificate", "certificate.png", "image/png", 10 * MB + 1),
+            ("passport", "passport.png", "image/png", 5 * MB + 1),
+            ("recommendation_letter", "letter.docx", DOCX_MIME, 5 * MB + 1),
+            ("english_test", "test.jpg", "image/jpeg", 5 * MB + 1),
+            ("cv", "cv.png", "image/png", 100),
+            ("transcript", "transcript.png", "image/png", 100),
+            ("recommendation_letter", "letter.exe", "application/x-msdownload", 100),
+            ("cv", "cv.pdf", "application/x-msdownload", 100),
+            ("cv", "cv.pdf", DOCX_MIME, 100),
+            ("passport", "passport.jpg", "image/png", 100),
+            ("unknown", "file.pdf", "application/pdf", 100),
+            ("cv", "file.pdf", "application/pdf", 0),
+            ("cv", "file.pdf", "application/pdf", -1),
+            ("cv", "file.pdf", "application/pdf", 1.5),
+            ("cv", "a" * 256 + ".pdf", "application/pdf", 100),
+        ]
+        for extension in ("js", "html", "sh", "zip", "py", "php", "bat", "cmd"):
+            cases.append(("cv", f"file.{extension}", "application/pdf", 100))
+        for document_type, name, mime, size in cases:
+            with self.subTest(document_type=document_type, name=name, size=size):
+                with patch.object(self.s3, "generate_object_key") as key_mock, patch.object(
+                    self.s3, "presign_put"
+                ) as presign_mock:
+                    response = self._request_upload(document_type, name, mime, size)
+                    self.assertIn(response.status_code, (400, 422), response.text)
+                    key_mock.assert_not_called()
+                    presign_mock.assert_not_called()
+                with self.Session() as db:
+                    self.assertEqual(db.query(DocumentUploadSession).count(), 0)
+
+    def test_filename_sanitization_cannot_control_storage_path(self):
+        for name in ("../../secret.pdf", "folder/file.Pdf", r"..\..\secret.pdf", "bad\x00\nname.pdf"):
+            with self.subTest(name=name):
+                response = self._request_upload(file_name=name)
+                self.assertEqual(response.status_code, 200, response.text)
+                session = self._session(response.json()["upload_id"])
+                self.assertRegex(session.original_file_name, r"^[A-Za-z0-9._-]{1,255}$")
+                self.assertRegex(
+                    session.object_key,
+                    rf"^users/{self.owner_id}/documents/cv/[0-9a-f-]{{36}}\.pdf$",
+                )
+
+    def test_invalid_s3_metadata_is_deleted_and_old_document_is_preserved(self):
+        upload_id, old_session, _ = self._upload_and_store()
+        old = self.client.post(
+            "/profile/documents/confirm", json={"upload_id": upload_id}
+        ).json()
+        for mime, size in (
+            ("application/pdf", 5 * MB + 1),
+            ("application/pdf", 999),
+            ("application/pdf", 0),
+            ("application/pdf", None),
+            ("image/png", 123),
+            (DOCX_MIME, 123),
+            (None, 123),
+        ):
+            with self.subTest(mime=mime, size=size):
+                new_id, session, _ = self._upload_and_store(
+                    mutate=lambda _session, mime=mime, size=size: (mime, size)
+                )
+                response = self.client.post(
+                    "/profile/documents/confirm", json={"upload_id": new_id}
+                )
+                self.assertEqual(response.status_code, 400, response.text)
+                self.assertEqual(self._session(new_id).status, "FAILED")
+                self.assertIn(session.object_key, self.s3.deleted)
+                self.assertNotIn(session.object_key, self.s3.objects)
+                self.assertNotIn(old_session.object_key, self.s3.deleted)
+                with self.Session() as db:
+                    profile = db.query(Profile).filter_by(user_id=self.owner_id).one()
+                    self.assertEqual(profile.documents_data["cv"]["id"], old["id"])
+                retry = self.client.post(
+                    "/profile/documents/confirm", json={"upload_id": new_id}
+                )
+                self.assertEqual(retry.status_code, 400)
+
+    def test_confirm_reapplies_policy_to_legacy_sessions(self):
+        for mime, name, size in (
+            ("application/pdf", "cv.pdf", 6 * MB),
+            ("image/png", "cv.png", 123),
+        ):
+            with self.subTest(mime=mime, size=size):
+                upload_id, session, _ = self._upload_and_store()
+                with self.Session() as db:
+                    row = db.get(DocumentUploadSession, upload_id)
+                    row.expected_file_size = size
+                    row.expected_content_type = mime
+                    row.original_file_name = name
+                    db.commit()
+                self.s3.put(session.object_key, mime, size)
+                response = self.client.post(
+                    "/profile/documents/confirm", json={"upload_id": upload_id}
+                )
+                self.assertEqual(response.status_code, 400)
+                self.assertIn(session.object_key, self.s3.deleted)
+                self.assertEqual(self._session(upload_id).status, "FAILED")
+
+    def test_valid_replacement_and_confirm_replay(self):
+        old_id, old_session, _ = self._upload_and_store()
+        old = self.client.post(
+            "/profile/documents/confirm", json={"upload_id": old_id}
+        ).json()
+        new_id, new_session, _ = self._upload_and_store(
+            file_name="new.docx", content_type=DOCX_MIME
+        )
+        self.assertEqual(self.client.get("/profile/documents").json()["cv"]["id"], old["id"])
+        response = self.client.post(
+            "/profile/documents/confirm", json={"upload_id": new_id}
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertNotEqual(response.json()["id"], old["id"])
+        self.assertIn(old_session.object_key, self.s3.deleted)
+        self.assertIn(new_session.object_key, self.s3.objects)
+        with self.Session() as db:
+            profile = db.query(Profile).filter_by(user_id=self.owner_id).one()
+            self.assertEqual(profile.documents_data["cv"]["id"], response.json()["id"])
+        replay = self.client.post(
+            "/profile/documents/confirm", json={"upload_id": new_id}
+        )
+        self.assertEqual(replay.status_code, 409)
+
+    def test_client_fields_cannot_override_session_or_ownership(self):
+        upload_id, session, _ = self._upload_and_store()
+        arbitrary_key = "users/999/documents/cv/stolen.pdf"
+        self.s3.put(arbitrary_key, "application/pdf", 123)
+        response = self.client.post("/profile/documents/confirm", json={
+            "upload_id": upload_id,
+            "user_id": self.other_id,
+            "document_type": "passport",
+            "object_key": arbitrary_key,
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["document_type"], "cv")
+        with self.Session() as db:
+            profile = db.query(Profile).filter_by(user_id=self.owner_id).one()
+            self.assertEqual(profile.documents_data["cv"]["object_key"], session.object_key)
+        self.current_user = self.other
+        self.client.delete(f"/profile/documents/{response.json()['id']}")
+        self.assertIn(session.object_key, self.s3.objects)
+        self.assertIsNone(self.client.get("/profile/documents").json()["cv"]["id"])
+
+    def test_foreign_session_cannot_trigger_s3_validation_or_cleanup(self):
+        upload_id, session, _ = self._upload_and_store(mutate=lambda _s: ("image/png", 123))
+        self.current_user = self.other
+        with patch.object(self.s3, "head_object") as head:
+            response = self.client.post(
+                "/profile/documents/confirm", json={"upload_id": upload_id}
+            )
+            self.assertEqual(response.status_code, 404)
+            head.assert_not_called()
+        self.assertIn(session.object_key, self.s3.objects)
+        self.assertEqual(self._session(upload_id).status, "PENDING")
+
+    def test_storage_errors_are_safe_and_cleanup_failure_does_not_accept_file(self):
+        with patch.object(self.s3, "presign_put", side_effect=RuntimeError("private AWS details")):
+            response = self._request_upload()
+            self.assertEqual(response.status_code, 503)
+            self.assertNotIn("private AWS details", response.text)
+        with self.Session() as db:
+            self.assertEqual(db.query(DocumentUploadSession).count(), 0)
+        upload_id, _session, _ = self._upload_and_store(mutate=lambda _s: ("image/png", 123))
+        with patch.object(self.s3, "head_object", side_effect=RuntimeError("private AWS details")):
+            response = self.client.post(
+                "/profile/documents/confirm", json={"upload_id": upload_id}
+            )
+            self.assertEqual(response.status_code, 503)
+            self.assertNotIn("private AWS details", response.text)
+        self.assertEqual(self._session(upload_id).status, "PENDING")
+        with patch.object(self.s3, "delete_object", side_effect=RuntimeError("private AWS details")):
+            response = self.client.post(
+                "/profile/documents/confirm", json={"upload_id": upload_id}
+            )
+            self.assertEqual(response.status_code, 400)
+            self.assertNotIn("private AWS details", response.text)
+        self.assertEqual(self._session(upload_id).status, "FAILED")
+        self.assertIsNone(self.client.get("/profile/documents").json()["cv"]["id"])
 
 
 if __name__ == "__main__":

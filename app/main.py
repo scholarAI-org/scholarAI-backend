@@ -38,7 +38,7 @@ app = FastAPI(
         },
         {
             "name": "Scholarships",
-            "description": "Ingested scholarship listings (duplicate check and create).",
+            "description": "Scholarship ingestion, status counts, and recommendation feed.",
         },
         {
             "name": "System",
