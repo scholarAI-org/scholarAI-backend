@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from enum import Enum
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -24,6 +25,26 @@ class AdminRecentPendingScholarshipsResponse(BaseModel):
     total: int = Field(
         ge=0, description="All matching scholarships before applying limit"
     )
+
+
+class ScholarshipReviewStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+class AdminScholarshipReview(AdminRecentPendingScholarship):
+    """Table fields for the full review page, filtered by stored status."""
+
+    status: ScholarshipReviewStatus
+
+
+class AdminScholarshipsReviewResponse(BaseModel):
+    items: list[AdminScholarshipReview]
+    total: int = Field(ge=0, description="Matching listings before pagination")
+    page: int = Field(ge=1)
+    page_size: int = Field(ge=1, le=100)
+    total_pages: int = Field(ge=0)
 
 
 class AdminDashboardStatistics(BaseModel):

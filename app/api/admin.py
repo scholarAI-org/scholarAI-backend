@@ -16,11 +16,80 @@ from app.schemas.admin import (
     AdminProfileResponse,
     AdminRecentPendingScholarship,
     AdminRecentPendingScholarshipsResponse,
+    AdminScholarshipReview,
+    AdminScholarshipsReviewResponse,
+    ScholarshipReviewStatus,
 )
 from app.services.avatar import avatar_presigned_url
 from app.services.s3 import StorageClient, get_s3_storage
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
+
+
+@router.get(
+    "/scholarships/review",
+    response_model=AdminScholarshipsReviewResponse,
+    summary="List aggregated scholarships for review by status",
+    description=(
+        "Paginated listings from for9a and ministry, filtered by status (pending by default). "
+        "Accepted statuses are pending, approved and rejected. Ordered by scraped_at "
+        "descending (unknown dates last), then id descending. Requires an admin."
+    ),
+    responses={
+        401: {"description": "Missing or invalid authentication"},
+        403: {"description": "Requires admin role"},
+    },
+)
+def get_scholarships_review(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    page: Annotated[int, Query(ge=1, description="Page number, starting at 1")] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+    scholarship_status: Annotated[
+        ScholarshipReviewStatus,
+        Query(alias="status", description="Stored scholarship review status"),
+    ] = ScholarshipReviewStatus.PENDING,
+) -> AdminScholarshipsReviewResponse:
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This operation is restricted to administrators.",
+        )
+
+    listings = db.query(Scholarship).filter(
+        Scholarship.source.in_(("for9a", "ministry")),
+        Scholarship.status == scholarship_status.value,
+    )
+    total = listings.with_entities(func.count(Scholarship.id)).scalar() or 0
+    total_pages = (total + page_size - 1) // page_size
+    rows = []
+    # An out-of-range page is empty; avoid sending arbitrary-size offsets to SQL.
+    if page <= total_pages:
+        rows = (
+            listings.with_entities(
+                Scholarship.id,
+                Scholarship.title,
+                Scholarship.organization_name,
+                Scholarship.country,
+                Scholarship.deadline,
+                Scholarship.no_deadline,
+                Scholarship.source,
+                Scholarship.source_url,
+                Scholarship.status,
+                Scholarship.scraped_at,
+            )
+            .order_by(Scholarship.scraped_at.desc().nulls_last(), Scholarship.id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+    return AdminScholarshipsReviewResponse(
+        items=[AdminScholarshipReview.model_validate(row) for row in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
+    )
 
 
 @router.get(
