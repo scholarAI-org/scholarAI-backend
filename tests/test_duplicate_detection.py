@@ -149,10 +149,15 @@ class AdminDuplicateDetectionEndpointTests(unittest.TestCase):
                     "source TEXT NOT NULL, "
                     "source_id TEXT, "
                     "source_url TEXT, "
+                    "study_level TEXT, "
+                    "funding_type TEXT, "
+                    "majors JSON, "
+                    "required_documents JSON, "
                     "status TEXT DEFAULT 'pending', "
                     "scraped_at TIMESTAMP, "
                     "reviewed_at TIMESTAMP, "
-                    "reviewed_by TEXT"
+                    "reviewed_by TEXT, "
+                    "updated_at TIMESTAMP"
                     ")"
                 )
             )

@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import List, Optional
+from typing import Any, List, Optional, Union
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -41,6 +41,11 @@ class ScholarshipBase(BaseModel):
         description="True when the ministry listing extends an existing scholarship.",
     )
 
+    study_level: Optional[str] = Field(None, description="المستوى الدراسي (بكالوريوس، ماجستير، دكتوراه)")
+    funding_type: Optional[str] = Field(None, description="التغطية المالية (ممولة بالكامل، راتب شهري + رسوم)")
+    majors: Optional[Union[List[str], str]] = Field(None, description="التخصصات المتاحة")
+    required_documents: Optional[Union[List[str], str]] = Field(None, description="المستندات المطلوبة")
+
     status: Optional[str] = Field(
         default="pending",
         description="Review workflow: pending, approved, or rejected.",
@@ -76,6 +81,10 @@ class ScholarshipUpdate(BaseModel):
     apply_email: Optional[str] = None
     apply_phone: Optional[str] = None
     source_url: Optional[str] = None
+    study_level: Optional[str] = None
+    funding_type: Optional[str] = None
+    majors: Optional[Union[List[str], str]] = None
+    required_documents: Optional[Union[List[str], str]] = None
 
 
 
@@ -83,6 +92,7 @@ class ScholarshipResponse(ScholarshipBase):
     id: int
     reviewed_at: Optional[datetime] = None
     reviewed_by: Optional[str] = None
+    updated_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 

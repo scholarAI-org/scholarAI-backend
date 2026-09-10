@@ -1,6 +1,6 @@
 from datetime import date, datetime
 from enum import Enum
-from typing import Optional
+from typing import Any, List, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -137,5 +137,58 @@ class ScholarshipActionResponse(BaseModel):
     scholarship_id: int = Field(..., description="معرف المنحة التي تمت عليها العملية")
     status: Optional[str] = Field(None, description="حالة المنحة بعد الإجراء")
     audit_log_id: Optional[int] = Field(None, description="معرف سجل التدقيق الذي وثّق العملية")
+
+
+class ScholarshipDetailResponse(BaseModel):
+    id: int
+    title: str
+    organization_name: Optional[str] = None
+    country: Optional[str] = None
+    study_level: Optional[str] = None
+    deadline: Optional[date] = None
+    no_deadline: Optional[bool] = False
+    funding_type: Optional[str] = None
+    majors: Optional[Union[List[str], str]] = None
+    required_documents: Optional[Union[List[str], str]] = None
+    scraped_at: Optional[datetime] = None
+    source: str
+    source_id: Optional[str] = None
+    source_url: Optional[str] = None
+    apply_link: Optional[str] = None
+    image_url: Optional[str] = None
+    description_html: Optional[str] = None
+    status: str
+    reviewed_at: Optional[datetime] = None
+    reviewed_by: Optional[str] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ScholarshipApproveRequest(BaseModel):
+    source_url: Optional[str] = Field(None, description="رابط المصدر الأصلي")
+    apply_link: Optional[str] = Field(None, description="رابط التقديم المباشر")
+    image_url: Optional[str] = Field(None, description="رابط الصورة")
+    organization_name: Optional[str] = Field(None, description="الجهة المانحة")
+    country: Optional[str] = Field(None, description="دولة الدراسة")
+    study_level: Optional[str] = Field(None, description="المستوى الدراسي")
+    funding_type: Optional[str] = Field(None, description="التغطية المالية")
+    majors: Optional[Union[List[str], str]] = Field(None, description="التخصصات المتاحة")
+    required_documents: Optional[Union[List[str], str]] = Field(None, description="المستندات المطلوبة")
+    deadline: Optional[date] = Field(None, description="الموعد النهائي")
+    no_deadline: Optional[bool] = Field(None, description="بدون موعد نهائي")
+
+
+class ScholarshipApproveResponse(BaseModel):
+    id: int = Field(..., description="معرف المنحة المعتمدة")
+    title: str = Field(..., description="عنوان المنحة")
+    status: str = Field("approved", description="حالة المنحة بعد الاعتماد (approved/published)")
+    is_published: bool = Field(True, description="هل أصبحت المنحة منشورة للطلاب")
+    reviewed_at: datetime = Field(..., description="تاريخ ووقت الاعتماد")
+    reviewed_by: str = Field(..., description="المسؤول الذي قام بالاعتماد")
+    updated_at: Optional[datetime] = Field(None, description="وقت التحديث")
+    audit_log_id: Optional[int] = Field(None, description="معرف سجل التدقيق")
+    message: str = Field("تم اعتماد ونشر المنحة بنجاح.", description="رسالة تأكيد العملية")
+
 
 

@@ -25,6 +25,9 @@ from app.schemas.admin import (
     DashboardAuditLogsResponse,
     DuplicateCandidateItem,
     ScholarshipActionResponse,
+    ScholarshipApproveRequest,
+    ScholarshipApproveResponse,
+    ScholarshipDetailResponse,
     ScholarshipDuplicateCheckRequest,
     ScholarshipDuplicateCheckResponse,
     ScholarshipReviewStatus,
@@ -481,6 +484,189 @@ def check_scholarship_duplicate(
     )
 
 
+@router.get(
+    "/scholarships/{scholarship_id}",
+    response_model=ScholarshipDetailResponse,
+    summary="Get scholarship review details for modal",
+    description="Returns full scholarship details including overview cards and input fields for the review modal.",
+    responses={
+        401: {"description": "Missing or invalid authentication"},
+        403: {"description": "Requires admin role"},
+        404: {"description": "Scholarship not found"},
+    },
+)
+def get_scholarship_review_detail(
+    scholarship_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> ScholarshipDetailResponse:
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This operation is restricted to administrators.",
+        )
+
+    scholarship = db.query(Scholarship).filter(Scholarship.id == scholarship_id).first()
+    if not scholarship:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Scholarship not found.",
+        )
+
+    return ScholarshipDetailResponse.model_validate(scholarship)
+
+
+def validate_scholarship_for_publication(scholarship: Scholarship) -> list[str]:
+    """
+    Validate mandatory fields for approving & publishing a scholarship.
+    Checks required publication inputs (source_url, apply_link, image_url)
+    and core scholarship information.
+    """
+    missing_or_invalid: list[str] = []
+
+    def is_valid_url(url: Optional[str]) -> bool:
+        if not url or not url.strip():
+            return False
+        u = url.strip().lower()
+        return u.startswith("http://") or u.startswith("https://")
+
+    # 1. Essential inputs from modal (red asterisks)
+    if not is_valid_url(scholarship.source_url):
+        missing_or_invalid.append("رابط المصدر الأصلي (source_url) مطلوب ويجب أن يكون رابطاً صالحاً (http/https).")
+    if not is_valid_url(scholarship.apply_link):
+        missing_or_invalid.append("رابط التقديم (apply_link) مطلوب ويجب أن يكون رابطاً صالحاً (http/https).")
+    if not is_valid_url(scholarship.image_url):
+        missing_or_invalid.append("رابط الصورة (image_url) مطلوب ويجب أن يكون رابطاً صالحاً (http/https).")
+
+    # 2. Core metadata
+    if not scholarship.title or not scholarship.title.strip():
+        missing_or_invalid.append("عنوان المنحة (title) مطلوب.")
+    if not scholarship.country or not scholarship.country.strip():
+        missing_or_invalid.append("دولة الدراسة (country) مطلوبة.")
+    if not scholarship.organization_name or not scholarship.organization_name.strip():
+        missing_or_invalid.append("الجهة المقدمة / المانحة (organization_name) مطلوبة.")
+    if not scholarship.deadline and not scholarship.no_deadline:
+        missing_or_invalid.append("الموعد النهائي (deadline) مطلوب ما لم يتم تحديد خيار بدون موعد نهائي.")
+
+    return missing_or_invalid
+
+
+@router.post(
+    "/scholarships/{scholarship_id}/approve",
+    response_model=ScholarshipApproveResponse,
+    summary="Approve & publish scholarship",
+    description=(
+        "Approves and publishes a pending scholarship. Validates essential publication fields "
+        "(source_url, apply_link, image_url, title, country, organization, deadline). "
+        "Records reviewed_by, reviewed_at, updated_at, and creates an audit log entry. "
+        "Rejects already approved (409 Conflict) or non-pending scholarships (400 Bad Request)."
+    ),
+    responses={
+        400: {"description": "Scholarship is not in pending status"},
+        401: {"description": "Missing or invalid authentication"},
+        403: {"description": "Requires admin role"},
+        404: {"description": "Scholarship not found"},
+        409: {"description": "Scholarship is already approved/published"},
+        422: {"description": "Mandatory publication fields missing or invalid"},
+    },
+)
+@router.post(
+    "/scholarships/{scholarship_id}/publish",
+    response_model=ScholarshipApproveResponse,
+    include_in_schema=False,
+)
+def approve_and_publish_scholarship(
+    scholarship_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    payload: Optional[ScholarshipApproveRequest] = None,
+) -> ScholarshipApproveResponse:
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This operation is restricted to administrators.",
+        )
+
+    scholarship = db.query(Scholarship).filter(Scholarship.id == scholarship_id).first()
+    if not scholarship:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Scholarship not found.",
+        )
+
+    # Status checks:
+    # 1. Prevent re-approving an already published/approved scholarship
+    if scholarship.status == "approved":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="المنحة معتمدة ومنشورة بالفعل ولا يمكن إعادة اعتمادها.",
+        )
+
+    # 2. Must be in pending status
+    if scholarship.status != "pending":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"لا يمكن اعتماد المنحة لأن حالتها الحالية ليست قيد المراجعة (الحالة الحالية: {scholarship.status}).",
+        )
+
+    # Apply any updated values sent from modal inputs
+    if payload:
+        data = payload.model_dump(exclude_unset=True)
+        for key, val in data.items():
+            if val is not None:
+                setattr(scholarship, key, val)
+
+    # Validate essential publication fields
+    errors = validate_scholarship_for_publication(scholarship)
+    if errors:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "message": "لا يمكن اعتماد ونشر المنحة بسبب نقص أو عدم صلاحية الحقول الإلزامية للنشر.",
+                "errors": errors,
+            },
+        )
+
+    now = datetime.now(timezone.utc)
+    reviewer_email = current_user.email or current_user.full_name or "admin"
+
+    scholarship.status = "approved"
+    scholarship.reviewed_by = reviewer_email
+    scholarship.reviewed_at = now
+    scholarship.updated_at = now
+
+    db.commit()
+    db.refresh(scholarship)
+
+    log_entry = create_audit_log(
+        db=db,
+        admin=current_user,
+        action="publish",
+        action_display="اعتماد ونشر",
+        entity_name=scholarship.title,
+        entity_id=scholarship.id,
+        details={
+            "source": scholarship.source,
+            "country": scholarship.country,
+            "reviewed_by": reviewer_email,
+            "study_level": scholarship.study_level,
+            "funding_type": scholarship.funding_type,
+        },
+    )
+
+    return ScholarshipApproveResponse(
+        id=scholarship.id,
+        title=scholarship.title,
+        status=scholarship.status,
+        is_published=True,
+        reviewed_at=scholarship.reviewed_at,
+        reviewed_by=scholarship.reviewed_by,
+        updated_at=scholarship.updated_at,
+        audit_log_id=log_entry.id,
+        message="تم اعتماد ونشر المنحة بنجاح.",
+    )
+
+
 @router.put(
     "/scholarships/{scholarship_id}",
     response_model=ScholarshipResponse,
@@ -522,6 +708,7 @@ def update_scholarship(
             }
             setattr(scholarship, field, new_val)
 
+    scholarship.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(scholarship)
 
