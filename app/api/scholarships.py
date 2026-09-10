@@ -15,6 +15,7 @@ from app.schemas import (
     ScholarshipResponse,
     ScholarshipStatusDistribution,
 )
+from app.services.audit import create_audit_log
 
 router = APIRouter(prefix="/api/scholarships", tags=["Scholarships"])
 
@@ -147,6 +148,18 @@ def create_scholarship(
         db.add(new_scholarship)
         db.commit()
         db.refresh(new_scholarship)
+        create_audit_log(
+            db=db,
+            admin=current_user,
+            action="create",
+            action_display="إضافة منحة",
+            entity_name=new_scholarship.title,
+            entity_id=new_scholarship.id,
+            details={
+                "source": new_scholarship.source,
+                "country": new_scholarship.country,
+            },
+        )
         return new_scholarship
     except IntegrityError:
         db.rollback()

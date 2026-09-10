@@ -64,6 +64,21 @@ class ScholarshipCreate(ScholarshipBase):
     )
 
 
+class ScholarshipUpdate(BaseModel):
+    title: Optional[str] = Field(None, min_length=2, description="Display title of the scholarship.")
+    organization_name: Optional[str] = Field(None, description="Granting organization.")
+    country: Optional[str] = Field(None, description="Host or destination country.")
+    deadline: Optional[date] = Field(None, description="Application deadline when known.")
+    no_deadline: Optional[bool] = Field(None, description="True when the listing has no fixed deadline.")
+    image_url: Optional[str] = None
+    description_html: Optional[str] = None
+    apply_link: Optional[str] = None
+    apply_email: Optional[str] = None
+    apply_phone: Optional[str] = None
+    source_url: Optional[str] = None
+
+
+
 class ScholarshipResponse(ScholarshipBase):
     id: int
     reviewed_at: Optional[datetime] = None

@@ -126,3 +126,16 @@ class ScholarshipDuplicateCheckRequest(BaseModel):
     deadline: Optional[date] = Field(None, description="الموعد النهائي للتقديم إن وجد")
     exclude_id: Optional[int] = Field(None, description="معرف منحة لاستثنائها من المقارنة (تستخدم عند فحص منحة قائمة)")
 
+
+class ScholarshipStatusUpdateRequest(BaseModel):
+    status: ScholarshipReviewStatus = Field(..., description="الحالة الجديدة للمنحة (approved, rejected, pending)")
+    reason: Optional[str] = Field(None, description="سبب تغيير الحالة أو سبب الرفض")
+
+
+class ScholarshipActionResponse(BaseModel):
+    message: str = Field(..., description="رسالة توضيحية لنجاح العملية")
+    scholarship_id: int = Field(..., description="معرف المنحة التي تمت عليها العملية")
+    status: Optional[str] = Field(None, description="حالة المنحة بعد الإجراء")
+    audit_log_id: Optional[int] = Field(None, description="معرف سجل التدقيق الذي وثّق العملية")
+
+

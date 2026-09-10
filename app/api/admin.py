@@ -1,4 +1,5 @@
-from typing import Annotated, Optional
+from datetime import datetime, timezone
+from typing import Any, Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func
@@ -23,11 +24,15 @@ from app.schemas.admin import (
     AuditLogItem,
     DashboardAuditLogsResponse,
     DuplicateCandidateItem,
+    ScholarshipActionResponse,
     ScholarshipDuplicateCheckRequest,
     ScholarshipDuplicateCheckResponse,
     ScholarshipReviewStatus,
+    ScholarshipStatusUpdateRequest,
 )
+from app.schemas.Scholarship import ScholarshipResponse, ScholarshipUpdate
 from app.services.admin_statistics import get_monthly_activity_statistics
+from app.services.audit import create_audit_log
 from app.services.avatar import avatar_presigned_url
 from app.services.duplicate_detection import find_duplicate_candidates
 from app.services.s3 import StorageClient, get_s3_storage
@@ -474,4 +479,185 @@ def check_scholarship_duplicate(
         highest_similarity_score=highest_score,
         candidates=[DuplicateCandidateItem.model_validate(c) for c in candidates],
     )
+
+
+@router.put(
+    "/scholarships/{scholarship_id}",
+    response_model=ScholarshipResponse,
+    summary="Update scholarship details with audit logging",
+    description="Updates scholarship fields and records an administrative audit log entry.",
+    responses={
+        401: {"description": "Missing or invalid authentication"},
+        403: {"description": "Requires admin role"},
+        404: {"description": "Scholarship not found"},
+    },
+)
+def update_scholarship(
+    scholarship_id: int,
+    payload: ScholarshipUpdate,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> ScholarshipResponse:
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This operation is restricted to administrators.",
+        )
+
+    scholarship = db.query(Scholarship).filter(Scholarship.id == scholarship_id).first()
+    if not scholarship:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Scholarship not found.",
+        )
+
+    update_data = payload.model_dump(exclude_unset=True)
+    changes: dict[str, Any] = {}
+    for field, new_val in update_data.items():
+        old_val = getattr(scholarship, field)
+        if old_val != new_val:
+            changes[field] = {
+                "old": str(old_val) if old_val is not None else None,
+                "new": str(new_val) if new_val is not None else None,
+            }
+            setattr(scholarship, field, new_val)
+
+    db.commit()
+    db.refresh(scholarship)
+
+    create_audit_log(
+        db=db,
+        admin=current_user,
+        action="edit",
+        action_display="تعديل",
+        entity_name=scholarship.title,
+        entity_id=scholarship.id,
+        details={"changes": changes} if changes else None,
+    )
+
+    return ScholarshipResponse.model_validate(scholarship)
+
+
+@router.patch(
+    "/scholarships/{scholarship_id}/status",
+    response_model=ScholarshipActionResponse,
+    summary="Update scholarship status with audit logging",
+    description="Updates scholarship status (pending, approved, rejected) and records an audit log.",
+    responses={
+        401: {"description": "Missing or invalid authentication"},
+        403: {"description": "Requires admin role"},
+        404: {"description": "Scholarship not found"},
+    },
+)
+def update_scholarship_status(
+    scholarship_id: int,
+    payload: ScholarshipStatusUpdateRequest,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> ScholarshipActionResponse:
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This operation is restricted to administrators.",
+        )
+
+    scholarship = db.query(Scholarship).filter(Scholarship.id == scholarship_id).first()
+    if not scholarship:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Scholarship not found.",
+        )
+
+    old_status = scholarship.status
+    new_status = payload.status.value
+
+    scholarship.status = new_status
+    scholarship.reviewed_at = datetime.now(timezone.utc)
+    scholarship.reviewed_by = current_user.email or current_user.full_name
+
+    db.commit()
+    db.refresh(scholarship)
+
+    if new_status == "approved":
+        action = "publish"
+        action_display = "اعتماد ونشر"
+    elif new_status == "rejected":
+        action = "reject"
+        action_display = "رفض"
+    else:
+        action = "status_change"
+        action_display = "تغيير حالة"
+
+    log_entry = create_audit_log(
+        db=db,
+        admin=current_user,
+        action=action,
+        action_display=action_display,
+        entity_name=scholarship.title,
+        entity_id=scholarship.id,
+        details={
+            "old_status": old_status,
+            "new_status": new_status,
+            "reason": payload.reason,
+        },
+    )
+
+    return ScholarshipActionResponse(
+        message=f"تم تغيير حالة المنحة بنجاح إلى: {action_display}",
+        scholarship_id=scholarship.id,
+        status=scholarship.status,
+        audit_log_id=log_entry.id,
+    )
+
+
+@router.delete(
+    "/scholarships/{scholarship_id}",
+    response_model=ScholarshipActionResponse,
+    summary="Delete scholarship with audit logging",
+    description="Deletes a scholarship and records an administrative audit log entry.",
+    responses={
+        401: {"description": "Missing or invalid authentication"},
+        403: {"description": "Requires admin role"},
+        404: {"description": "Scholarship not found"},
+    },
+)
+def delete_scholarship(
+    scholarship_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> ScholarshipActionResponse:
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This operation is restricted to administrators.",
+        )
+
+    scholarship = db.query(Scholarship).filter(Scholarship.id == scholarship_id).first()
+    if not scholarship:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Scholarship not found.",
+        )
+
+    title = scholarship.title
+
+    db.delete(scholarship)
+    db.commit()
+
+    log_entry = create_audit_log(
+        db=db,
+        admin=current_user,
+        action="delete",
+        action_display="حذف",
+        entity_name=title,
+        entity_id=scholarship_id,
+    )
+
+    return ScholarshipActionResponse(
+        message=f"تم حذف المنحة '{title}' بنجاح وتوثيق العملية في سجل التدقيق.",
+        scholarship_id=scholarship_id,
+        status="deleted",
+        audit_log_id=log_entry.id,
+    )
+
 
