@@ -22,10 +22,14 @@ from app.schemas.admin import (
     AdminScholarshipsReviewResponse,
     AuditLogItem,
     DashboardAuditLogsResponse,
+    DuplicateCandidateItem,
+    ScholarshipDuplicateCheckRequest,
+    ScholarshipDuplicateCheckResponse,
     ScholarshipReviewStatus,
 )
 from app.services.admin_statistics import get_monthly_activity_statistics
 from app.services.avatar import avatar_presigned_url
+from app.services.duplicate_detection import find_duplicate_candidates
 from app.services.s3 import StorageClient, get_s3_storage
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
@@ -365,3 +369,109 @@ def get_dashboard_audit_logs(
         items=[AuditLogItem.model_validate(log) for log in logs],
         total=total,
     )
+
+
+@router.get(
+    "/scholarships/{scholarship_id}/duplicates",
+    response_model=ScholarshipDuplicateCheckResponse,
+    summary="Check duplicate scholarship candidates for an existing scholarship",
+    description=(
+        "Analyzes the specified scholarship against other listings using fuzzy "
+        "and heuristic matching (title, apply link, country, organization) and "
+        "returns potential duplicate candidates with similarity scores and reasons."
+    ),
+    responses={
+        401: {"description": "Missing or invalid authentication"},
+        403: {"description": "Requires admin role"},
+        404: {"description": "Scholarship not found"},
+    },
+)
+def get_scholarship_duplicates(
+    scholarship_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    threshold: Annotated[
+        float,
+        Query(ge=0.1, le=1.0, description="Minimum similarity score threshold"),
+    ] = 0.75,
+    limit: Annotated[
+        int,
+        Query(ge=1, le=20, description="Maximum number of candidates to return"),
+    ] = 5,
+) -> ScholarshipDuplicateCheckResponse:
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This operation is restricted to administrators.",
+        )
+
+    scholarship = db.query(Scholarship).filter(Scholarship.id == scholarship_id).first()
+    if not scholarship:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Scholarship not found.",
+        )
+
+    candidates = find_duplicate_candidates(
+        db=db,
+        target=scholarship,
+        threshold=threshold,
+        limit=limit,
+        exclude_id=scholarship.id,
+    )
+
+    highest_score = candidates[0]["similarity_score"] if candidates else 0.0
+    return ScholarshipDuplicateCheckResponse(
+        is_suspected_duplicate=len(candidates) > 0,
+        highest_similarity_score=highest_score,
+        candidates=[DuplicateCandidateItem.model_validate(c) for c in candidates],
+    )
+
+
+@router.post(
+    "/scholarships/check-duplicate",
+    response_model=ScholarshipDuplicateCheckResponse,
+    summary="Check potential duplicate candidates for new scholarship payload",
+    description=(
+        "Evaluates a scholarship payload (title, country, apply_link, organization_name) "
+        "against stored listings and returns potential duplicate matches."
+    ),
+    responses={
+        401: {"description": "Missing or invalid authentication"},
+        403: {"description": "Requires admin role"},
+    },
+)
+def check_scholarship_duplicate(
+    payload: ScholarshipDuplicateCheckRequest,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    threshold: Annotated[
+        float,
+        Query(ge=0.1, le=1.0, description="Minimum similarity score threshold"),
+    ] = 0.75,
+    limit: Annotated[
+        int,
+        Query(ge=1, le=20, description="Maximum number of candidates to return"),
+    ] = 5,
+) -> ScholarshipDuplicateCheckResponse:
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This operation is restricted to administrators.",
+        )
+
+    candidates = find_duplicate_candidates(
+        db=db,
+        target=payload.model_dump(),
+        threshold=threshold,
+        limit=limit,
+        exclude_id=payload.exclude_id,
+    )
+
+    highest_score = candidates[0]["similarity_score"] if candidates else 0.0
+    return ScholarshipDuplicateCheckResponse(
+        is_suspected_duplicate=len(candidates) > 0,
+        highest_similarity_score=highest_score,
+        candidates=[DuplicateCandidateItem.model_validate(c) for c in candidates],
+    )
+

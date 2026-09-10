@@ -97,3 +97,32 @@ class AuditLogItem(BaseModel):
 class DashboardAuditLogsResponse(BaseModel):
     items: list[AuditLogItem] = Field(..., description="قائمة سجلات التدقيق")
     total: int = Field(ge=0, description="إجمالي عدد السجلات المطابقة")
+
+
+class DuplicateCandidateItem(BaseModel):
+    id: int = Field(..., description="معرف المنحة المشتبه بها")
+    title: str = Field(..., description="عنوان المنحة المشتبه بها")
+    source: str = Field(..., description="مصدر المنحة")
+    status: str = Field(..., description="حالة المنحة الحالية (pending, approved, rejected)")
+    country: Optional[str] = Field(None, description="دولة المنحة")
+    organization_name: Optional[str] = Field(None, description="الجهة المانحة")
+    similarity_score: float = Field(..., ge=0.0, le=1.0, description="نسبة التشابه المقاسة (0.0 إلى 1.0)")
+    reasons: list[str] = Field(default_factory=list, description="أسباب ترجيح التكرار بالتفصيل")
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ScholarshipDuplicateCheckResponse(BaseModel):
+    is_suspected_duplicate: bool = Field(..., description="هل توجد منحة محتمل أنها مكررة بناءً على المعايير")
+    highest_similarity_score: float = Field(..., ge=0.0, le=1.0, description="أعلى نسبة تشابه تم العثور عليها")
+    candidates: list[DuplicateCandidateItem] = Field(default_factory=list, description="قائمة المنح المشابهة مرتبة بالأعلى تشابهاً")
+
+
+class ScholarshipDuplicateCheckRequest(BaseModel):
+    title: str = Field(..., min_length=2, description="عنوان المنحة المراد فحصها")
+    organization_name: Optional[str] = Field(None, description="اسم المؤسسة أو الجامعة المانحة")
+    country: Optional[str] = Field(None, description="دولة المنحة")
+    apply_link: Optional[str] = Field(None, description="رابط التقديم المباشر إن وجد")
+    deadline: Optional[date] = Field(None, description="الموعد النهائي للتقديم إن وجد")
+    exclude_id: Optional[int] = Field(None, description="معرف منحة لاستثنائها من المقارنة (تستخدم عند فحص منحة قائمة)")
+
