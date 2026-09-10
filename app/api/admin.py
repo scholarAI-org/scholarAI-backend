@@ -13,16 +13,18 @@ from app.models.profile import Profile
 from app.models.user import User
 from app.schemas.admin import (
     AdminDashboardStatistics,
+    AdminMonthlyActivityResponse,
     AdminNotificationUnreadCountResponse,
     AdminProfileResponse,
     AdminRecentPendingScholarship,
     AdminRecentPendingScholarshipsResponse,
-    AuditLogItem,
-    DashboardAuditLogsResponse,
     AdminScholarshipReview,
     AdminScholarshipsReviewResponse,
+    AuditLogItem,
+    DashboardAuditLogsResponse,
     ScholarshipReviewStatus,
 )
+from app.services.admin_statistics import get_monthly_activity_statistics
 from app.services.avatar import avatar_presigned_url
 from app.services.s3 import StorageClient, get_s3_storage
 
@@ -199,6 +201,34 @@ def get_dashboard_statistics(
         published_scholarships=counts.published_scholarships,
         users=counts.users,
     )
+
+
+@router.get(
+    "/dashboard/monthly-activity",
+    response_model=AdminMonthlyActivityResponse,
+    summary="Get monthly platform activity",
+    description=(
+        "Returns the last 12 UTC calendar months, oldest first, including the current "
+        "month and zero-activity months. Counts currently approved scholarships by "
+        "reviewed_at, falling back to scraped_at when review dates are missing, and "
+        "all users by created_at. Undated records are excluded. Requires an admin."
+    ),
+    responses={
+        401: {"description": "Missing or invalid authentication"},
+        403: {"description": "Requires admin role"},
+    },
+)
+def get_dashboard_monthly_activity(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> AdminMonthlyActivityResponse:
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This operation is restricted to administrators.",
+        )
+
+    return get_monthly_activity_statistics(db)
 
 
 @router.get(

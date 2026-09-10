@@ -53,6 +53,18 @@ class AdminDashboardStatistics(BaseModel):
     users: int = Field(ge=0)
 
 
+class AdminMonthlyActivityItem(BaseModel):
+    year: int
+    month: int = Field(ge=1, le=12)
+    month_name: str
+    approved_scholarships: int = Field(ge=0)
+    users: int = Field(ge=0)
+
+
+class AdminMonthlyActivityResponse(BaseModel):
+    items: list[AdminMonthlyActivityItem] = Field(min_length=12, max_length=12)
+
+
 class AdminNotificationUnreadCountResponse(BaseModel):
     unread_count: int = Field(ge=0, description="عدد الإشعارات غير المقروءة")
 
