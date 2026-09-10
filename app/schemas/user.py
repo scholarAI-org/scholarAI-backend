@@ -81,6 +81,14 @@ class Token(BaseModel):
     token_type: str = "bearer"
 
 
+class GoogleAuthRequest(BaseModel):
+    credential: str = Field(..., min_length=1, description="Google OpenID Connect ID token")
+
+
+class GoogleAuthResponse(Token):
+    user: UserResponse
+
+
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr = Field(..., examples=["user@example.com"])
 
