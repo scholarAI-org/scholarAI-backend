@@ -613,7 +613,7 @@ def approve_and_publish_scholarship(
     if payload:
         data = payload.model_dump(exclude_unset=True)
         for key, val in data.items():
-            if val is not None:
+            if val is not None and hasattr(scholarship, key):
                 setattr(scholarship, key, val)
 
     # Validate essential publication fields
@@ -638,6 +638,16 @@ def approve_and_publish_scholarship(
     db.commit()
     db.refresh(scholarship)
 
+    audit_details: dict[str, Any] = {
+        "source": scholarship.source,
+        "country": scholarship.country,
+        "reviewed_by": reviewer_email,
+        "study_level": scholarship.study_level,
+        "funding_type": scholarship.funding_type,
+    }
+    if payload and payload.notes:
+        audit_details["notes"] = payload.notes
+
     log_entry = create_audit_log(
         db=db,
         admin=current_user,
@@ -645,13 +655,7 @@ def approve_and_publish_scholarship(
         action_display="اعتماد ونشر",
         entity_name=scholarship.title,
         entity_id=scholarship.id,
-        details={
-            "source": scholarship.source,
-            "country": scholarship.country,
-            "reviewed_by": reviewer_email,
-            "study_level": scholarship.study_level,
-            "funding_type": scholarship.funding_type,
-        },
+        details=audit_details,
     )
 
     return ScholarshipApproveResponse(

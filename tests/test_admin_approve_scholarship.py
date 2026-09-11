@@ -230,6 +230,7 @@ class AdminApproveScholarshipTests(unittest.TestCase):
             "image_url": "https://ankara.edu.tr/images/scholarship.png",
             "study_level": "بكالوريوس",
             "funding_type": "ممولة بالكامل",
+            "notes": "تم تدقيق الروابط والتحقق من التخصصات بواسطة الإدارة",
         }
         response = self.client.post(
             f"/admin/scholarships/{self.pending_incomplete_id}/approve",
@@ -246,6 +247,19 @@ class AdminApproveScholarshipTests(unittest.TestCase):
             self.assertEqual(sch.apply_link, "https://ankara.edu.tr/apply-now")
             self.assertEqual(sch.image_url, "https://ankara.edu.tr/images/scholarship.png")
             self.assertEqual(sch.study_level, "بكالوريوس")
+
+            # Check audit log notes
+            log = (
+                db.query(AuditLog)
+                .filter(
+                    AuditLog.entity_id == self.pending_incomplete_id,
+                    AuditLog.action == "publish",
+                )
+                .first()
+            )
+            self.assertIsNotNone(log)
+            self.assertIn("notes", log.details)
+            self.assertEqual(log.details["notes"], "تم تدقيق الروابط والتحقق من التخصصات بواسطة الإدارة")
 
     def test_validation_error_on_missing_mandatory_fields(self):
         # pending_incomplete has no apply_link and no image_url

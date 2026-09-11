@@ -177,6 +177,7 @@ class ScholarshipApproveRequest(BaseModel):
     required_documents: Optional[Union[List[str], str]] = Field(None, description="المستندات المطلوبة")
     deadline: Optional[date] = Field(None, description="الموعد النهائي")
     no_deadline: Optional[bool] = Field(None, description="بدون موعد نهائي")
+    notes: Optional[str] = Field(None, description="ملاحظات المراجعة أو النشر الإدارية")
 
 
 class ScholarshipApproveResponse(BaseModel):
