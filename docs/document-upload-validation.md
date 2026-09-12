@@ -12,14 +12,48 @@ extension and MIME allowlists. Limits use 1 MB = 1,048,576 bytes.
 | `passport` | PDF, JPG, JPEG, PNG | 5,242,880 |
 | `recommendation_letter` | PDF, DOCX | 5,242,880 per file |
 | `english_test` | PDF, JPG, JPEG, PNG | 5,242,880 |
+| `university_admission_letter` | PDF, JPG, JPEG, PNG | 10,485,760 |
 
 MIME types are `application/pdf`, `image/jpeg`, `image/png`, and
 `application/vnd.openxmlformats-officedocument.wordprocessingml.document`.
 The existing additional `motivation_letter` type retains its PDF policy and
-`S3_MAX_FILE_BYTES` limit. The six types above have explicit limits independent
+`S3_MAX_FILE_BYTES` limit. The seven types above have explicit limits independent
 of that legacy setting. The existing recommendation count setting
 `S3_MAX_RECOMMENDATION_LETTERS` is preserved; the stored list key remains
 `recommendation_letters`.
+
+## University Admission Letter
+
+The enum member is `ProfileDocumentType.UNIVERSITY_ADMISSION_LETTER`; its API
+and storage value is `university_admission_letter`, following the existing
+lowercase document-type convention. The display name is University Admission
+Letter. Use the existing upload URL and confirm endpoints. Listing via
+`GET /profile/documents` and `GET /profile` includes the new optional
+`university_admission_letter` slot. Download and delete use its document ID.
+
+The policy follows graduation certificates: PDF/JPG/JPEG/PNG, at most 10 MiB,
+one document per owner, replaced only after successful confirmation. Existing
+authentication, filename sanitization, MIME/size checks, S3 metadata verification,
+session expiry, duplicate-confirmation rejection and storage cleanup apply.
+The new slot is optional and adds no profile-completion points.
+
+`DOCUMENT_RULES[ProfileDocumentType.UNIVERSITY_ADMISSION_LETTER]["is_improvable"]`
+is explicitly `False`. No capability fields are added to the existing public
+document metadata contract. Successful uploads have the normal `UPLOADED` status,
+without an improvement score or suggestions.
+
+This repository currently has no document AI improvement, rewriting, extraction,
+scoring, recommendation queue, or improvement endpoint. Therefore no such service
+is invoked by this upload flow. A request to a nonexistent improvement route gets
+the existing 404; no artificial improvement endpoint is introduced just to return
+400/422. Future improvement workflows must consult the centralized capability
+before accepting this type. S3 HEAD verification remains active; it is metadata
+verification, not content extraction or malware scanning.
+
+No migration is needed: the existing `document_upload_sessions.document_type`
+column is `VARCHAR(64)`, and confirmed metadata resides in `profiles.documents`
+JSON. Existing rows do not need backfilling; the new slot defaults to
+`NOT_UPLOADED`. No PostgreSQL enum or new storage table is introduced.
 
 ## Request and confirmation flow
 

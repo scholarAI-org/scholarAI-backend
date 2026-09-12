@@ -295,6 +295,9 @@ class Documents(BaseModel):
     recommendation_letters: List[UploadedFile] = Field(default_factory=list)
     english_test: UploadedFile = Field(default_factory=UploadedFile)
     motivation_letter: UploadedFile = Field(default_factory=UploadedFile)
+    university_admission_letter: UploadedFile = Field(
+        default_factory=UploadedFile, title="University Admission Letter"
+    )
 
     model_config = ConfigDict(from_attributes=True)
 
