@@ -43,6 +43,13 @@ IMAGE_TYPES = {
 }
 
 DOCUMENT_RULES: dict[ProfileDocumentType, dict[str, Any]] = {
+    ProfileDocumentType.UNIVERSITY_ADMISSION_LETTER: {
+        "extensions": {**PDF_TYPES, **IMAGE_TYPES},
+        "max_count": 1,
+        "slot": "university_admission_letter",
+        "max_bytes": 10 * 1024 * 1024,
+        "is_improvable": False,
+    },
     ProfileDocumentType.CV: {
         "extensions": {**PDF_TYPES, **DOCX_TYPES},
         "max_bytes": 5 * 1024 * 1024,
@@ -196,6 +203,7 @@ def _empty_documents() -> dict[str, Any]:
         "passport": _empty_slot("passport"),
         "english_test": _empty_slot("english_test"),
         "motivation_letter": _empty_slot("motivation_letter"),
+        "university_admission_letter": _empty_slot("university_admission_letter"),
         "recommendation_letters": [],
     }
 
@@ -225,6 +233,7 @@ def load_documents_dict(profile: Optional[Profile]) -> dict[str, Any]:
         "graduation_certificate",
         "passport",
         "english_test",
+        "university_admission_letter",
     ):
         if isinstance(stored.get(key), dict):
             merged = {**base[key], **stored[key]}
@@ -251,6 +260,7 @@ def _iter_stored_documents(data: dict[str, Any]):
         "graduation_certificate",
         "passport",
         "english_test",
+        "university_admission_letter",
     ):
         item = data.get(key) or {}
         if isinstance(item, dict):

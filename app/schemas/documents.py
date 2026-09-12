@@ -13,6 +13,7 @@ class ProfileDocumentType(str, Enum):
     RECOMMENDATION_LETTER = "recommendation_letter"
     ENGLISH_TEST = "english_test"
     MOTIVATION_LETTER = "motivation_letter"
+    UNIVERSITY_ADMISSION_LETTER = "university_admission_letter"
 
 
 class UploadUrlRequest(BaseModel):
