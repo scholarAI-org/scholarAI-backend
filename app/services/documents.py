@@ -30,18 +30,29 @@ from app.services.s3 import StorageClient
 
 logger = logging.getLogger(__name__)
 
-PDF_TYPES = {".pdf": {"application/pdf", "application/x-pdf", "application/octet-stream"}}
+PDF_TYPES = {
+    ".pdf": {
+        "application/pdf",
+        "application/x-pdf",
+        "application/acrobat",
+        "application/x-acrobat",
+        "applications/vnd.pdf",
+        "text/pdf",
+        "application/octet-stream",
+    }
+}
 DOCX_TYPES = {
     ".docx": {
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/msword",
+        "application/x-msword",
         "application/octet-stream",
     }
 }
 IMAGE_TYPES = {
-    ".jpg": {"image/jpeg", "image/pjpeg"},
-    ".jpeg": {"image/jpeg", "image/pjpeg"},
-    ".png": {"image/png"},
+    ".jpg": {"image/jpeg", "image/jpg", "image/pjpeg"},
+    ".jpeg": {"image/jpeg", "image/jpg", "image/pjpeg"},
+    ".png": {"image/png", "image/x-png"},
 }
 
 DOCUMENT_RULES: dict[ProfileDocumentType, dict[str, Any]] = {
@@ -93,12 +104,6 @@ DOCUMENT_RULES: dict[ProfileDocumentType, dict[str, Any]] = {
         "max_count": 1,
         "slot": "motivation_letter",
     },
-    ProfileDocumentType.UNIVERSITY_ADMISSION_LETTER: {
-        "extensions": {**PDF_TYPES, **IMAGE_TYPES},
-        "max_count": 1,
-        "slot": "university_admission_letter",
-        "max_bytes": 10 * 1024 * 1024,
-    },
 }
 
 UNSAFE_FILENAME_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
@@ -115,12 +120,13 @@ def _as_utc(value: datetime) -> datetime:
 
 
 def sanitize_file_name(file_name: str) -> str:
-    name = Path(file_name.replace("\\", "/")).name.strip()
-    name = unicodedata.normalize("NFKC", name)
-    name = UNSAFE_FILENAME_CHARS.sub("_", name).strip("._")
-    if not name:
-        name = "document"
-    return name[:255]
+    path = Path(file_name.replace("\\", "/"))
+    suffix = path.suffix.lower()
+    raw_stem = unicodedata.normalize("NFKC", path.stem).strip()
+    safe_stem = UNSAFE_FILENAME_CHARS.sub("_", raw_stem).strip("._")
+    if not safe_stem:
+        safe_stem = "document"
+    return f"{safe_stem[:200]}{suffix}"
 
 
 def _extension_for(file_name: str) -> str:

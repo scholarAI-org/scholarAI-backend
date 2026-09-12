@@ -242,3 +242,24 @@ def test_openapi_and_legacy_documents(case):
     documents = case.client.get("/profile/documents").json()
     assert documents[TYPE]["status"] == "NOT_UPLOADED"
     assert documents["cv"]["status"] == "NOT_UPLOADED"
+
+
+@pytest.mark.parametrize(
+    "arabic_filename",
+    [
+        "قبول_جامعي.pdf",
+        "إشعار قبول.pdf",
+        "رسالة_القبول_الجامعي (1).pdf",
+        "مستند قبول النهائي.PDF",
+    ],
+)
+def test_arabic_and_unicode_filenames_valid(case, arabic_filename):
+    upload_id, session, record = confirm(
+        case,
+        file_name=arabic_filename,
+        content_type="application/pdf",
+        file_size=2 * MB,
+    )
+    assert record["document_type"] == TYPE
+    assert record["status"] == "UPLOADED"
+
