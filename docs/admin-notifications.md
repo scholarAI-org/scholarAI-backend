@@ -1,7 +1,7 @@
 # Admin notifications
 
 Implemented on the existing `feature/admin` branch. The branch includes the latest
-`origin/main`; no new Git branch, push, or pull request was created. The merge
+`origin/main`; no new Git branch or pull request was created. The merge
 preserved both admin and Google authentication model registrations.
 
 ## API
@@ -180,3 +180,37 @@ skipped; the new PostgreSQL API/concurrency and migration checks were run explic
 Changes outside this feature in the preceding merge are inherited from
 `origin/main`. No unrelated implementation refactoring, secrets, local database
 files, generated caches, or `.env` files are included in the feature commit.
+
+## Subsequent GitHub synchronization
+
+Before pushing, four concurrent commits on `origin/feature/admin` were merged,
+preserving duplicate detection, scholarship edits/approval, and audit logging
+alongside notification creation. Their review migration also collided with
+main's Google authentication revision `20260910_01`. Its schema operations remain
+unchanged; its corrected identity is `20260910_admin01`, following the corrected
+audit revision `20260909_admin01`.
+
+The new no-op merge revision `20260912_merge02` joins `20260912_notify01` and
+`20260910_admin01` and is now the single head. Databases already at
+`20260912_notify01` can run `alembic upgrade head` to add the incoming scholarship
+review columns. The repair utility also recognizes old review stamps using the
+actual schema, including review plus preferences without Google authentication.
+These combinations and the upgrade from the notification head were tested in
+isolated local PostgreSQL databases. During the subsequent requested server
+verification, the configured database was upgraded to `20260912_merge02`, and
+its scholarship review columns were verified.
+
+The same verification found early scholarship commits before audit logging in
+the incoming create, edit, approve, status-change, and delete paths. Those early
+commits were removed so the existing audit helper commits all changes together.
+An injected audit-failure regression confirms that all five operations roll back,
+including the notification created during ingestion.
+
+The final focused run passed 174 tests and 56 subtests, with four optional tests
+skipped. After restarting the server, real read-only requests to health, Swagger,
+OpenAPI, notification listing/count, scholarship review listing, and scholarship
+details all returned HTTP 200. Nothing was pushed to GitHub.
+
+The subsequent full-project run reported 370 passed, six skipped, 120 passing
+subtests, and the same 141 pre-existing academic/preferences fixture teardown
+errors described above. No new failing feature tests were found.

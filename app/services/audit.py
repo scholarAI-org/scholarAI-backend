@@ -5,9 +5,13 @@ from app.models.audit_log import AuditLog
 from app.models.user import User
 
 ACTION_DISPLAY_MAP = {
-    "publish": "اعتماد ونشر",
+    "create": "إضافة منحة",
     "edit": "تعديل",
     "delete": "حذف",
+    "approve": "اعتماد ونشر",
+    "publish": "اعتماد ونشر",
+    "reject": "رفض",
+    "status_change": "تغيير حالة",
 }
 
 

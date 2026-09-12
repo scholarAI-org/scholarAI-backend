@@ -98,7 +98,7 @@ def test_upgrade_preserves_legacy_and_safe_downgrade(migration_engine):
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            == "20260912_notify01"
+            == "20260912_merge02"
         )
         assert (
             connection.execute(
@@ -108,10 +108,26 @@ def test_upgrade_preserves_legacy_and_safe_downgrade(migration_engine):
         )
 
 
-@pytest.mark.parametrize("existing", ["main", "legacy_admin", "both"])
+@pytest.mark.parametrize(
+    "existing",
+    [
+        "main",
+        "legacy_admin",
+        "both",
+        "legacy_review",
+        "review_with_preferences",
+        "notifications",
+    ],
+)
 def test_upgrade_from_main_and_repaired_existing_admin(migration_engine, existing):
     engine = migration_engine
-    if existing in {"legacy_admin", "both"}:
+    if existing in {
+        "legacy_admin",
+        "both",
+        "legacy_review",
+        "review_with_preferences",
+        "notifications",
+    }:
         result = migrate(engine, "upgrade", "20260909_admin01")
         assert result.returncode == 0, result.stderr
         with engine.begin() as connection:
@@ -124,6 +140,20 @@ def test_upgrade_from_main_and_repaired_existing_admin(migration_engine, existin
                 connection.execute(
                     text("UPDATE alembic_version SET version_num='20260909_01'")
                 )
+    if existing in {"legacy_review", "review_with_preferences"}:
+        result = migrate(engine, "upgrade", "20260910_admin01")
+        assert result.returncode == 0, result.stderr
+        if existing == "review_with_preferences":
+            result = migrate(engine, "upgrade", "20260909_01")
+            assert result.returncode == 0, result.stderr
+        with engine.begin() as connection:
+            connection.execute(text("DELETE FROM alembic_version"))
+            connection.execute(
+                text("INSERT INTO alembic_version VALUES ('20260910_01')")
+            )
+    if existing == "notifications":
+        result = migrate(engine, "upgrade", "20260912_notify01")
+        assert result.returncode == 0, result.stderr
     if existing in {"main", "both"}:
         result = migrate(engine, "upgrade", "20260910_01")
         assert result.returncode == 0, result.stderr
@@ -148,6 +178,8 @@ def test_upgrade_from_main_and_repaired_existing_admin(migration_engine, existin
         applied = repair_revision(connection, apply=True)
         if existing == "main":
             assert "No legacy" in preview
+        elif existing == "notifications":
+            assert "already recorded" in preview
         else:
             assert "Preview:" in preview and "Applied:" in applied
             assert "already recorded" in repair_revision(connection, apply=True)
@@ -158,7 +190,7 @@ def test_upgrade_from_main_and_repaired_existing_admin(migration_engine, existin
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            == "20260912_notify01"
+            == "20260912_merge02"
         )
         if existing != "main":
             assert (

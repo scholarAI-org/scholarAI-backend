@@ -18,7 +18,13 @@ def repair_revision(connection: Connection, *, apply: bool = False) -> str:
     versions = set(
         connection.execute(text("SELECT version_num FROM alembic_version")).scalars()
     )
-    if versions & {"20260909_admin01", "20260912_merge01", "20260912_notify01"}:
+    if versions & {
+        "20260909_admin01",
+        "20260910_admin01",
+        "20260912_merge01",
+        "20260912_notify01",
+        "20260912_merge02",
+    }:
         return "Admin audit revision is already recorded correctly."
     if versions not in ({"20260909_01"}, {"20260910_01"}):
         raise RuntimeError(
@@ -39,7 +45,7 @@ def repair_revision(connection: Connection, *, apply: bool = False) -> str:
     audit_columns = {column["name"] for column in inspector.get_columns("audit_logs")}
     if (
         not required_audit <= audit_columns
-        or not {"profiles", "admin_notifications"} <= tables
+        or not {"profiles", "admin_notifications", "scholarships"} <= tables
     ):
         raise RuntimeError(
             "Incomplete legacy admin schema; refusing to stamp migrations"
@@ -47,25 +53,49 @@ def repair_revision(connection: Connection, *, apply: bool = False) -> str:
     preferences_applied = "detailed_specialization" in {
         column["name"] for column in inspector.get_columns("profiles")
     }
+    review_columns = {
+        "study_level",
+        "funding_type",
+        "majors",
+        "required_documents",
+        "updated_at",
+    }
+    scholarship_columns = {
+        column["name"] for column in inspector.get_columns("scholarships")
+    }
+    review_applied = review_columns <= scholarship_columns
+    if review_columns & scholarship_columns and not review_applied:
+        raise RuntimeError(
+            "Incomplete scholarship review schema; refusing to stamp migrations"
+        )
     if not preferences_applied:
-        if versions != {"20260909_01"} or "auth_accounts" in tables:
+        if "auth_accounts" in tables or (
+            versions == {"20260910_01"} and not review_applied
+        ):
             raise RuntimeError("Inconsistent main schema; refusing to stamp migrations")
-        description = "Replace legacy admin stamp 20260909_01 with 20260909_admin01."
+        corrected = "20260910_admin01" if review_applied else "20260909_admin01"
+        description = f"Replace legacy admin stamp with {corrected}."
         if apply:
             connection.execute(
-                text(
-                    "UPDATE alembic_version SET version_num='20260909_admin01' WHERE version_num='20260909_01'"
-                )
+                text("UPDATE alembic_version SET version_num=:corrected"),
+                {"corrected": corrected},
             )
     else:
-        description = (
-            "Keep main's stamp and record the already-applied admin audit head."
-        )
+        # The old 20260910_01 may mean review, not Google auth. Preserve only
+        # the preferences stamp if review ran but Google auth has not run.
+        google_pending = versions == {"20260910_01"} and "auth_accounts" not in tables
+        if google_pending and not review_applied:
+            raise RuntimeError("Inconsistent main schema; refusing to stamp migrations")
+        corrected = "20260910_admin01" if review_applied else "20260909_admin01"
+        description = "Keep main's stamp and record the already-applied admin head."
         if apply:
-            connection.execute(
-                text(
-                    "INSERT INTO alembic_version (version_num) VALUES ('20260909_admin01')"
+            if google_pending:
+                connection.execute(
+                    text("UPDATE alembic_version SET version_num='20260909_01'")
                 )
+            connection.execute(
+                text("INSERT INTO alembic_version (version_num) VALUES (:corrected)"),
+                {"corrected": corrected},
             )
     return ("Applied: " if apply else "Preview: ") + description
 

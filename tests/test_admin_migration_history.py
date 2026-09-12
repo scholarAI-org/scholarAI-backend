@@ -12,7 +12,7 @@ class AdminMigrationHistoryTests(unittest.TestCase):
         with warnings.catch_warnings():
             warnings.simplefilter("error", UserWarning)
             script = ScriptDirectory.from_config(Config("alembic.ini"))
-            self.assertEqual(script.get_heads(), ["20260912_notify01"])
+            self.assertEqual(script.get_heads(), ["20260912_merge02"])
             revisions = list(script.walk_revisions())
         self.assertEqual(
             script.get_revision("20260912_merge01").down_revision,
@@ -29,3 +29,11 @@ class AdminMigrationHistoryTests(unittest.TestCase):
             script.get_revision("20260909_01").down_revision, "20260907_02"
         )
         self.assertEqual(len({r.revision for r in revisions}), len(revisions))
+
+        self.assertEqual(
+            script.get_revision("20260910_admin01").down_revision, "20260909_admin01"
+        )
+        self.assertEqual(
+            script.get_revision("20260912_merge02").down_revision,
+            ("20260912_notify01", "20260910_admin01"),
+        )

@@ -18,6 +18,7 @@ from app.schemas import (
     ScholarshipStatusDistribution,
 )
 from app.services.admin_notifications import create_admin_notification
+from app.services.audit import create_audit_log
 
 router = APIRouter(prefix="/api/scholarships", tags=["Scholarships"])
 
@@ -162,8 +163,19 @@ def create_scholarship(
                 action_type=NotificationActionType.OPEN_SCHOLARSHIP_REVIEW,
                 event_key=f"scholarship:{new_scholarship.id}:pending",
             )
-        db.commit()
-        db.refresh(new_scholarship)
+        # The audit helper commits the scholarship, notification, and audit together.
+        create_audit_log(
+            db=db,
+            admin=current_user,
+            action="create",
+            action_display="إضافة منحة",
+            entity_name=new_scholarship.title,
+            entity_id=new_scholarship.id,
+            details={
+                "source": new_scholarship.source,
+                "country": new_scholarship.country,
+            },
+        )
         return new_scholarship
     except IntegrityError:
         db.rollback()

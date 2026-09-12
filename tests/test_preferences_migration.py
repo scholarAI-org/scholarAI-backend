@@ -10,7 +10,7 @@ from sqlalchemy import create_engine, inspect, text
 
 def test_preferences_migration_has_one_head_and_preserves_existing_history():
     script = ScriptDirectory.from_config(Config("alembic.ini"))
-    assert script.get_heads() == ["20260912_notify01"]
+    assert script.get_heads() == ["20260912_merge02"]
     migration = script.get_revision("20260909_01")
     assert migration.down_revision == "20260907_02"
     assert script.get_revision("20260907_01").down_revision == "20260906_02"
@@ -94,7 +94,7 @@ def test_upgrade_preserves_targets_and_legacy_arrays_and_downgrade_guards_data()
                 connection.execute(
                     text("SELECT version_num FROM alembic_version")
                 ).scalar_one()
-                == "20260912_notify01"
+                == "20260912_merge02"
             )
             assert (
                 connection.execute(
