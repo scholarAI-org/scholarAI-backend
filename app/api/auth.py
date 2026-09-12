@@ -455,6 +455,18 @@ def resend_verification_otp(
     return {"message": "Verification OTP sent to your email"}
 
 
+def _safe_send_reset_password_email(email: str, token: str) -> None:
+    try:
+        send_reset_password_email(email, token)
+    except Exception as exc:
+        logger.error(
+            "Password reset email failed for email=%s error_type=%s message=%s",
+            email,
+            type(exc).__name__,
+            str(exc),
+        )
+
+
 @router.post(
     '/forgot-password',
     response_model=MessageResponse,
@@ -465,11 +477,12 @@ async def forgot_password(
     background_tasks: BackgroundTasks, 
     db: Session = Depends(get_db)
 ):
-    user = db.query(User).filter(User.email == request.email).first()
+    normalized_email = request.email.lower().strip()
+    user = db.query(User).filter(func.lower(User.email) == normalized_email).first()
     if user:
         reset_token = create_reset_token(email=user.email)
         # إرسال الإيميل في الخلفية لعدم إبطاء الـ API
-        background_tasks.add_task(send_reset_password_email, user.email, reset_token)
+        background_tasks.add_task(_safe_send_reset_password_email, user.email, reset_token)
     
     return {'message': 'إذا كان البريد مسجلاً، فقد تم إرسال رابط إعادة التعيين إلى إيميلك.'}
 
@@ -490,7 +503,7 @@ def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db))
             detail='الرمز غير صالح أو انتهت صلاحيته!'
         )
     
-    user = db.query(User).filter(User.email == email).first()
+    user = db.query(User).filter(func.lower(User.email) == email.lower().strip()).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='المستخدم غير موجود')
     

@@ -94,7 +94,8 @@ def send_verification_otp_email(email_to: str, otp: str) -> None:
 
 
 def send_reset_password_email(email_to: str, token: str) -> None:
-    reset_link = f"{settings.FRONTEND_URL}/reset-password?token={token}"
+    frontend_url = settings.FRONTEND_URL.rstrip("/")
+    reset_link = f"{frontend_url}/reset-password?token={token}"
     html_content = f"""
     <div style="font-family: Arial, sans-serif; direction: rtl; text-align: right; padding: 20px;">
         <h2>طلب إعادة تعيين كلمة المرور - Scholar AI</h2>
