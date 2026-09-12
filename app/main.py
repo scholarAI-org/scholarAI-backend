@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError, SQLAlchemyError
 from app.api.auth import router as auth_router
 from app.api.profile import router as profile_router
 from app.api.scholarships import router as scholarships_router
+from app.api.scholarship_review_details import router as scholarship_review_details_router
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -106,6 +107,7 @@ async def sqlalchemy_error_handler(request: Request, exc: SQLAlchemyError):
 app.include_router(auth_router)
 app.include_router(profile_router)
 app.include_router(scholarships_router)
+app.include_router(scholarship_review_details_router)
 
 
 @app.get("/", tags=["System"], summary="API root")
