@@ -190,6 +190,9 @@ class ScholarshipDetailResponse(BaseModel):
     status: str
     reviewed_at: Optional[datetime] = None
     reviewed_by: Optional[str] = None
+    rejection_reason: Optional[str] = None
+    admin_id: Optional[int] = None
+    rejected_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
@@ -220,3 +223,25 @@ class ScholarshipApproveResponse(BaseModel):
     updated_at: Optional[datetime] = Field(None, description="وقت التحديث")
     audit_log_id: Optional[int] = Field(None, description="معرف سجل التدقيق")
     message: str = Field("تم اعتماد ونشر المنحة بنجاح.", description="رسالة تأكيد العملية")
+
+
+class ScholarshipRejectRequest(BaseModel):
+    reason: str = Field(
+        ...,
+        min_length=3,
+        description="سبب رفض المنحة (إلزامي كما في واجهة المراجعة)",
+    )
+
+
+class ScholarshipRejectResponse(BaseModel):
+    id: int = Field(..., description="معرف المنحة المرفوضة")
+    title: str = Field(..., description="عنوان المنحة")
+    status: str = Field("rejected", description="حالة المنحة بعد الرفض (rejected)")
+    rejection_reason: str = Field(..., description="سبب الرفض المسجل")
+    admin_id: Optional[int] = Field(None, description="معرف المشرف الذي قام بالرفض")
+    reviewed_by: Optional[str] = Field(None, description="اسم أو بريد المشرف المراجع")
+    rejected_at: datetime = Field(..., description="تاريخ ووقت الرفض")
+    updated_at: Optional[datetime] = Field(None, description="وقت التحديث")
+    audit_log_id: Optional[int] = Field(None, description="معرف سجل التدقيق")
+    message: str = Field("تم رفض وأرشفة المنحة بنجاح.", description="رسالة تأكيد العملية")
+

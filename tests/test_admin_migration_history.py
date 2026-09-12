@@ -12,8 +12,11 @@ class AdminMigrationHistoryTests(unittest.TestCase):
         with warnings.catch_warnings():
             warnings.simplefilter("error", UserWarning)
             script = ScriptDirectory.from_config(Config("alembic.ini"))
-            self.assertEqual(script.get_heads(), ["20260912_merge02"])
+            self.assertEqual(script.get_heads(), ["20260912_reject01"])
             revisions = list(script.walk_revisions())
+        self.assertEqual(
+            script.get_revision("20260912_reject01").down_revision, "20260912_merge02"
+        )
         self.assertEqual(
             script.get_revision("20260912_merge01").down_revision,
             ("20260909_admin01", "20260910_01"),

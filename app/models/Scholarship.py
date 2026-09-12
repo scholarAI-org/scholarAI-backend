@@ -3,6 +3,7 @@ from sqlalchemy import (
     Column,
     Date,
     DateTime,
+    ForeignKey,
     Index,
     Integer,
     JSON,
@@ -115,6 +116,18 @@ class Scholarship(Base):
     scraped_at = Column(DateTime(timezone=True), nullable=True, comment="When the listing was scraped.")
     reviewed_at = Column(DateTime(timezone=True), nullable=True, comment="When a reviewer last acted on the listing.")
     reviewed_by = Column(String(100), nullable=True, comment="Reviewer identifier (email or username).")
+    rejection_reason = Column(Text, nullable=True, comment="سبب رفض المنحة")
+    admin_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="معرف المشرف المسؤول عن المراجعة أو الرفض",
+    )
+    rejected_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="تاريخ ووقت رفض المنحة",
+    )
     updated_at = Column(
         DateTime(timezone=True),
         nullable=True,

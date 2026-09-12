@@ -157,6 +157,9 @@ class AdminDuplicateDetectionEndpointTests(unittest.TestCase):
                     "scraped_at TIMESTAMP, "
                     "reviewed_at TIMESTAMP, "
                     "reviewed_by TEXT, "
+                    "rejection_reason TEXT, "
+                    "admin_id INTEGER, "
+                    "rejected_at TIMESTAMP, "
                     "updated_at TIMESTAMP"
                     ")"
                 )

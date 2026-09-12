@@ -33,6 +33,8 @@ from app.schemas.admin import (
     ScholarshipDetailResponse,
     ScholarshipDuplicateCheckRequest,
     ScholarshipDuplicateCheckResponse,
+    ScholarshipRejectRequest,
+    ScholarshipRejectResponse,
     ScholarshipReviewStatus,
     ScholarshipStatusUpdateRequest,
 )
@@ -747,6 +749,112 @@ def approve_and_publish_scholarship(
     )
 
 
+@router.post(
+    "/scholarships/{scholarship_id}/reject",
+    response_model=ScholarshipRejectResponse,
+    summary="Reject & soft-delete scholarship",
+    description=(
+        "Rejects/archives a scholarship with a mandatory reason. Saves rejection reason, "
+        "admin ID, rejection timestamp, and generates an administrative audit log. "
+        "Prevents re-rejecting already rejected scholarships (409 Conflict)."
+    ),
+    responses={
+        400: {"description": "Invalid operation"},
+        401: {"description": "Missing or invalid authentication"},
+        403: {"description": "Requires admin role"},
+        404: {"description": "Scholarship not found"},
+        409: {"description": "Scholarship is already rejected"},
+        422: {"description": "Rejection reason is mandatory"},
+    },
+)
+@router.post(
+    "/scholarships/{scholarship_id}/soft-delete",
+    response_model=ScholarshipRejectResponse,
+    include_in_schema=False,
+)
+def reject_scholarship(
+    scholarship_id: int,
+    payload: ScholarshipRejectRequest,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> ScholarshipRejectResponse:
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This operation is restricted to administrators.",
+        )
+
+    scholarship = db.query(Scholarship).filter(Scholarship.id == scholarship_id).first()
+    if not scholarship:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Scholarship not found.",
+        )
+
+    # Prevent re-rejecting already rejected scholarships
+    if scholarship.status == "rejected":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="المنحة مرفوضة بالفعل ولا يمكن إعادة رفضها.",
+        )
+
+    # Validate mandatory rejection reason
+    cleaned_reason = payload.reason.strip() if payload.reason else ""
+    if len(cleaned_reason) < 3:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "message": "سبب الرفض إلزامي ويجب ألا يقل عن 3 أحرف.",
+                "field": "reason",
+            },
+        )
+
+    old_status = scholarship.status
+    now = datetime.now(timezone.utc)
+    reviewer_identity = current_user.email or current_user.full_name or "admin"
+
+    scholarship.status = "rejected"
+    scholarship.rejection_reason = cleaned_reason
+    scholarship.admin_id = current_user.id
+    scholarship.reviewed_by = reviewer_identity
+    scholarship.rejected_at = now
+    scholarship.reviewed_at = now
+    scholarship.updated_at = now
+
+    db.commit()
+    db.refresh(scholarship)
+
+    log_entry = create_audit_log(
+        db=db,
+        admin=current_user,
+        action="reject",
+        action_display="رفض",
+        entity_name=scholarship.title,
+        entity_id=scholarship.id,
+        details={
+            "reason": cleaned_reason,
+            "old_status": old_status,
+            "new_status": "rejected",
+            "admin_id": current_user.id,
+            "reviewed_by": reviewer_identity,
+            "rejected_at": now.isoformat(),
+        },
+    )
+
+    return ScholarshipRejectResponse(
+        id=scholarship.id,
+        title=scholarship.title,
+        status=scholarship.status,
+        rejection_reason=scholarship.rejection_reason,
+        admin_id=scholarship.admin_id,
+        reviewed_by=scholarship.reviewed_by,
+        rejected_at=scholarship.rejected_at,
+        updated_at=scholarship.updated_at,
+        audit_log_id=log_entry.id,
+        message="تم رفض وأرشفة المنحة بنجاح وتوثيق العملية في سجل التدقيق.",
+    )
+
+
 @router.put(
     "/scholarships/{scholarship_id}",
     response_model=ScholarshipResponse,
@@ -834,10 +942,12 @@ def update_scholarship_status(
 
     old_status = scholarship.status
     new_status = payload.status.value
+    now = datetime.now(timezone.utc)
 
     scholarship.status = new_status
-    scholarship.reviewed_at = datetime.now(timezone.utc)
+    scholarship.reviewed_at = now
     scholarship.reviewed_by = current_user.email or current_user.full_name
+    scholarship.updated_at = now
 
     if new_status == "approved":
         action = "publish"
@@ -845,6 +955,10 @@ def update_scholarship_status(
     elif new_status == "rejected":
         action = "reject"
         action_display = "رفض"
+        if payload.reason:
+            scholarship.rejection_reason = payload.reason.strip()
+        scholarship.admin_id = current_user.id
+        scholarship.rejected_at = now
     else:
         action = "status_change"
         action_display = "تغيير حالة"

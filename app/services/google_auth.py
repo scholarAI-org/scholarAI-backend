@@ -1,8 +1,12 @@
 from dataclasses import dataclass
 from typing import Any
 
-from google.auth.transport import requests
-from google.oauth2 import id_token
+try:
+    from google.auth.transport import requests
+    from google.oauth2 import id_token
+except ImportError:  # pragma: no cover
+    requests = None
+    id_token = None
 
 from app.core.config import settings
 

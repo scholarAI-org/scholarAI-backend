@@ -92,6 +92,9 @@ class ScholarshipResponse(ScholarshipBase):
     id: int
     reviewed_at: Optional[datetime] = None
     reviewed_by: Optional[str] = None
+    rejection_reason: Optional[str] = None
+    admin_id: Optional[int] = None
+    rejected_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
