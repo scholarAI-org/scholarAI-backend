@@ -1,4 +1,4 @@
-from typing import Annotated, Optional
+from typing import Annotated, Optional, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func
@@ -7,13 +7,16 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models import Scholarship
-from app.models.admin_notification import AdminNotification
+from app.models.admin_notification import AdminNotification, NotificationType
 from app.models.audit_log import AuditLog
 from app.models.profile import Profile
 from app.models.user import User
 from app.schemas.admin import (
     AdminDashboardStatistics,
     AdminMonthlyActivityResponse,
+    AdminNotificationItem,
+    AdminNotificationReadResponse,
+    AdminNotificationsResponse,
     AdminNotificationUnreadCountResponse,
     AdminProfileResponse,
     AdminRecentPendingScholarship,
@@ -23,6 +26,10 @@ from app.schemas.admin import (
     AuditLogItem,
     DashboardAuditLogsResponse,
     ScholarshipReviewStatus,
+)
+from app.services.admin_notifications import (
+    filtered_notifications,
+    mark_notification_read,
 )
 from app.services.admin_statistics import get_monthly_activity_statistics
 from app.services.avatar import avatar_presigned_url
@@ -254,13 +261,85 @@ def get_unread_notifications_count(
             detail="This operation is restricted to administrators.",
         )
 
-    unread_count = (
-        db.query(func.count(AdminNotification.id))
-        .filter(AdminNotification.is_read == False)  # noqa: E712
-        .scalar()
-    ) or 0
+    unread_count = filtered_notifications(
+        db, cast(int, current_user.id), is_read=False
+    ).count()
 
     return AdminNotificationUnreadCountResponse(unread_count=unread_count)
+
+
+@router.get(
+    "/notifications",
+    response_model=AdminNotificationsResponse,
+    summary="List notifications visible to the current admin",
+    responses={
+        401: {"description": "Missing or invalid authentication"},
+        403: {"description": "Requires admin role"},
+    },
+)
+def get_admin_notifications(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+    is_read: bool | None = None,
+    notification_type: Annotated[NotificationType | None, Query(alias="type")] = None,
+) -> AdminNotificationsResponse:
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=403, detail="This operation is restricted to administrators."
+        )
+    query = filtered_notifications(
+        db,
+        cast(int, current_user.id),
+        is_read=is_read,
+        notification_type=notification_type,
+    )
+    total = query.count()
+    rows = (
+        query.order_by(AdminNotification.created_at.desc(), AdminNotification.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return AdminNotificationsResponse(
+        items=[AdminNotificationItem.model_validate(row) for row in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=(total + page_size - 1) // page_size,
+    )
+
+
+@router.patch(
+    "/notifications/{notification_id}/read",
+    response_model=AdminNotificationReadResponse,
+    summary="Mark one notification as read for the current admin",
+    responses={
+        401: {"description": "Missing or invalid authentication"},
+        403: {"description": "Requires admin role"},
+        404: {"description": "Notification not found"},
+    },
+)
+def read_admin_notification(
+    notification_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> AdminNotificationReadResponse:
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=403, detail="This operation is restricted to administrators."
+        )
+    try:
+        result = mark_notification_read(db, cast(int, current_user.id), notification_id)
+        if result is None:
+            raise HTTPException(status_code=404, detail="Notification not found")
+        response = AdminNotificationReadResponse(id=result.id, read_at=result.read_at)
+        db.commit()
+        return response
+    except Exception:
+        db.rollback()
+        raise
 
 
 @router.get(

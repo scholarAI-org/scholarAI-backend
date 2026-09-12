@@ -4,6 +4,36 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.models.admin_notification import NotificationActionType
+
+
+class AdminNotificationItem(BaseModel):
+    id: int
+    # Keep legacy stored types readable; new writes and query filters use enums.
+    type: str
+    title: str
+    message: str
+    created_at: datetime
+    is_read: bool
+    related_entity_id: int | None
+    action_type: NotificationActionType | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AdminNotificationsResponse(BaseModel):
+    items: list[AdminNotificationItem]
+    total: int = Field(ge=0)
+    page: int = Field(ge=1)
+    page_size: int = Field(ge=1, le=100)
+    total_pages: int = Field(ge=0)
+
+
+class AdminNotificationReadResponse(BaseModel):
+    id: int
+    is_read: bool = True
+    read_at: datetime
+
 
 class AdminRecentPendingScholarship(BaseModel):
     id: int

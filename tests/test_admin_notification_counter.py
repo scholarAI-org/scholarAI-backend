@@ -12,7 +12,7 @@ os.environ.setdefault("SECRET_KEY", "test-secret-key-for-admin-notification-coun
 from app.core.database import get_db
 from app.core.security import create_access_token
 from app.main import app
-from app.models.admin_notification import AdminNotification
+from app.models.admin_notification import AdminNotification, AdminNotificationRead
 from app.models.user import User
 
 
@@ -30,6 +30,7 @@ class AdminNotificationCounterTests(unittest.TestCase):
 
         AdminNotification.__table__.create(self.engine)
         User.__table__.create(self.engine)
+        AdminNotificationRead.__table__.create(self.engine)
 
         def override_get_db():
             with self.Session() as db:

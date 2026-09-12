@@ -1,6 +1,6 @@
 """create audit logs table
 
-Revision ID: 20260909_01
+Revision ID: 20260909_admin01
 Revises: 20260908_admin01
 Create Date: 2026-09-09
 
@@ -11,7 +11,7 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "20260909_01"
+revision: str = "20260909_admin01"
 down_revision: str | Sequence[str] | None = "20260908_admin01"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
