@@ -1,17 +1,20 @@
 import logging
+import secrets
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.user import User
-from app.models.profile import Profile
+from app.models.auth_account import AuthAccount
 from app.schemas.user import (
     UserCreate, UserLogin, Token,
     ForgotPasswordRequest, ResetPasswordRequest, ChangePasswordRequest,
     MessageResponse, VerifyEmailRequest, ResendVerificationOtpRequest,
+    GoogleAuthRequest, GoogleAuthResponse,
 )
 from app.core.security import (
     hash_password, verify_password, create_access_token,
@@ -29,6 +32,8 @@ from app.services.email_verification import (
     otp_matches,
     utc_now_naive,
 )
+from app.services.accounts import add_user_with_profile
+from app.services.google_auth import GoogleCredentialError, verify_google_id_token
 
 router = APIRouter(prefix='/auth', tags=['Authentication'])
 logger = logging.getLogger("uvicorn.error")
@@ -185,20 +190,15 @@ def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
     hashed_pwd = hash_password(user_data.password)
 
     # ✅ التعديل: إسناد full_name من user_data
-    new_user = User(
-        full_name=user_data.full_name,
-        email=user_data.email,
-        hashed_password=hashed_pwd,
-        role=user_data.role if user_data.role else "student",
-        is_email_verified=not settings.EMAIL_VERIFICATION_ENABLED,
-    )
     try:
-        db.add(new_user)
-        db.flush()
-
-        # Create the profile in the same transaction as the user and OTP state.
-        new_profile = Profile(user_id=new_user.id)
-        db.add(new_profile)
+        new_user = add_user_with_profile(
+            db,
+            full_name=user_data.full_name,
+            email=user_data.email,
+            hashed_password=hashed_pwd,
+            role=user_data.role if user_data.role else "student",
+            is_email_verified=not settings.EMAIL_VERIFICATION_ENABLED,
+        )
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(
@@ -278,6 +278,103 @@ def login_user(
 
     access_token = create_access_token(data={'sub': str(user.id), 'role': user.role})
     return {'access_token': access_token, 'token_type': 'bearer'}
+
+
+@router.post(
+    "/google",
+    response_model=GoogleAuthResponse,
+    summary="Sign up or log in with Google",
+    responses={
+        401: {"description": "Invalid Google credential"},
+        403: {"description": "Application account disabled"},
+        409: {"description": "Google identity conflict"},
+        503: {"description": "Google login unavailable or database error"},
+    },
+)
+def google_auth(request: GoogleAuthRequest, db: Session = Depends(get_db)):
+    try:
+        identity = verify_google_id_token(request.credential)
+    except GoogleCredentialError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        logger.error("Google authentication configuration error")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Google authentication is unavailable",
+        ) from exc
+
+    try:
+        account = (
+            db.query(AuthAccount)
+            .filter(
+                AuthAccount.provider == "google",
+                AuthAccount.provider_user_id == identity.subject,
+            )
+            .first()
+        )
+        if account:
+            user = account.user
+            if user.email.lower() != identity.email:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Google identity conflicts with an existing account",
+                )
+        else:
+            user = (
+                db.query(User)
+                .filter(func.lower(User.email) == identity.email)
+                .with_for_update()
+                .first()
+            )
+            if user is None:
+                user = add_user_with_profile(
+                    db,
+                    full_name=identity.full_name,
+                    email=identity.email,
+                    hashed_password=hash_password(secrets.token_urlsafe(48)),
+                    role="student",
+                    is_email_verified=True,
+                )
+            else:
+                # Google's verified email proves control of the same mailbox.
+                user.is_email_verified = True
+                clear_verification_otp(user)
+
+            db.add(
+                AuthAccount(
+                    user_id=user.id,
+                    provider="google",
+                    provider_user_id=identity.subject,
+                )
+            )
+
+        if not user.is_active:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Account is disabled",
+            )
+
+        db.commit()
+        db.refresh(user)
+    except HTTPException:
+        raise
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Google identity conflicts with an existing account",
+        ) from exc
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Could not authenticate due to a database error",
+        ) from exc
+
+    access_token = create_access_token(data={"sub": str(user.id), "role": user.role})
+    return {"access_token": access_token, "token_type": "bearer", "user": user}
+
 
 @router.post('/verify-email', response_model=MessageResponse)
 def verify_email(request: VerifyEmailRequest, db: Session = Depends(get_db)):
@@ -437,4 +534,3 @@ def change_password(
 )
 def logout_user(current_user: User = Depends(get_current_user)):
     return {'message': 'تم تسجيل الخروج بنجاح!'}
-

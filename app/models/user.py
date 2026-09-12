@@ -22,3 +22,6 @@ class User(Base):
         default=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
     )
     profile = relationship("Profile", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    auth_accounts = relationship(
+        "AuthAccount", back_populates="user", cascade="all, delete-orphan"
+    )

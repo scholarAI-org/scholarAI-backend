@@ -65,7 +65,6 @@ class ProfileFieldRequirementsTests(unittest.TestCase):
             field_of_study="Computer Science",
             field_of_study_openalex_id="https://openalex.org/subfields/1702",
             study_status="CURRENTLY_STUDYING",
-            target_field_of_study="Artificial Intelligence",
             gpa=GPA(value=3.8, scale=GPAScale.SCALE_4),
             expected_graduation_year=2026,
         )
@@ -80,7 +79,6 @@ class ProfileFieldRequirementsTests(unittest.TestCase):
                 field_of_study="Computer Science",
                 field_of_study_openalex_id="https://openalex.org/subfields/1702",
                 study_status="CURRENTLY_STUDYING",
-                target_field_of_study="Artificial Intelligence",
                 expected_graduation_year=2026,
             )
         self.assertTrue(any(err["loc"] == ("gpa",) for err in ctx.exception.errors()))
@@ -92,7 +90,6 @@ class ProfileFieldRequirementsTests(unittest.TestCase):
                 field_of_study="Computer Science",
                 field_of_study_openalex_id="https://openalex.org/subfields/1702",
                 study_status="CURRENTLY_STUDYING",
-                target_field_of_study="Artificial Intelligence",
                 gpa=GPA(value=3.5, scale=GPAScale.SCALE_4),
             )
         self.assertTrue(
@@ -188,7 +185,6 @@ class ProfileFieldRequirementsTests(unittest.TestCase):
             field_of_study="Computer Science",
             field_of_study_openalex_id="https://openalex.org/subfields/1702",
             study_status="CURRENTLY_STUDYING",
-            target_field_of_study="Artificial Intelligence",
             gpa=GPA(value=85.0, scale=GPAScale.SCALE_100),
             expected_graduation_year=2027,
             # institution is omitted/optional!
@@ -196,7 +192,7 @@ class ProfileFieldRequirementsTests(unittest.TestCase):
         preferences = PreferencesResponse(
             desired_degree_level=DesiredDegreeLevel.MASTER,
             funding_type=FundingType.FULL,
-            preferred_fields_of_study=["Engineering"],
+            target_field_of_study="Engineering",
             preferred_countries=["DE"],
         )  # 28%
         docs = Documents(

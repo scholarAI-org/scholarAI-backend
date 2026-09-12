@@ -21,7 +21,8 @@ app = FastAPI(
         "Scholar AI backend API.\n\n"
         "Auth bodies use JSON with snake_case field names "
         "(`full_name`, `email`, `password`). "
-        "Protected routes require a Bearer token from `/auth/login`."
+        "Protected routes require an application Bearer token from `/auth/login` "
+        "or `/auth/google`."
     ),
     openapi_tags=[
         {

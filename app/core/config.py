@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     # إعدادات الواجهة الأمامية
     FRONTEND_URL: str = "http://localhost:3000"
 
+    # Google OpenID Connect (browser obtains an ID token; API verifies it)
+    GOOGLE_CLIENT_ID: Optional[str] = None
+
     # إعدادات البريد الإلكتروني
     MAIL_USERNAME: Optional[str] = "test@example.com"
     MAIL_PASSWORD: Optional[str] = "password"

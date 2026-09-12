@@ -100,8 +100,6 @@ class Profile(Base):
     field_of_study = Column(String(255), nullable=True)
     field_of_study_openalex_id = Column(String(255), nullable=True)
     study_status = Column(Enum(StudyStatus), nullable=True)
-    target_field_of_study = Column(String(255), nullable=True)
-    target_field_of_study_openalex_id = Column(String(255), nullable=True)
     research_specialization = Column(String(255), nullable=True)
     research_specialization_openalex_id = Column(String(255), nullable=True)
     institution = Column(String(255), nullable=True)
@@ -120,8 +118,12 @@ class Profile(Base):
     skills_data = Column(JSON, default=list)
 
     desired_degree_level = Column(Enum(DesiredDegreeLevel), nullable=True)
+    target_field_of_study = Column(String(255), nullable=True)
+    target_field_of_study_openalex_id = Column(String(255), nullable=True)
+    detailed_specialization = Column(String(255), nullable=True)
     funding_type = Column(Enum(FundingType), nullable=True)
-    preferred_fields_of_study = Column(JSON, default=list)
+    # Retained only as a legacy archive; never used as a target-field fallback.
+    legacy_preferred_fields_of_study = Column("preferred_fields_of_study", JSON, default=list)
     preferred_countries = Column(JSON, default=list)
     open_to_all_countries = Column(Boolean, default=False, nullable=True)
     has_experience = Column(Boolean, nullable=True)
