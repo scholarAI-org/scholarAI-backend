@@ -151,9 +151,10 @@ def _complete_registration_without_verification(user: User, db: Session) -> None
     },
 )
 def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
+    normalized_email = user_data.email.lower().strip()
     existing_user = (
         db.query(User)
-        .filter(User.email == user_data.email)
+        .filter(func.lower(User.email) == normalized_email)
         .with_for_update()
         .first()
     )
@@ -255,9 +256,10 @@ def login_user(
     user_data: UserLogin,
     db: Session = Depends(get_db)
 ):
+    normalized_email = user_data.email.lower().strip()
     user = (
         db.query(User)
-        .filter(User.email == user_data.email)
+        .filter(func.lower(User.email) == normalized_email)
         .first()
     )
 
@@ -378,9 +380,10 @@ def google_auth(request: GoogleAuthRequest, db: Session = Depends(get_db)):
 
 @router.post('/verify-email', response_model=MessageResponse)
 def verify_email(request: VerifyEmailRequest, db: Session = Depends(get_db)):
+    normalized_email = request.email.lower().strip()
     user = (
         db.query(User)
-        .filter(User.email == request.email)
+        .filter(func.lower(User.email) == normalized_email)
         .with_for_update()
         .first()
     )
@@ -426,9 +429,10 @@ def resend_verification_otp(
     request: ResendVerificationOtpRequest,
     db: Session = Depends(get_db),
 ):
+    normalized_email = request.email.lower().strip()
     user = (
         db.query(User)
-        .filter(User.email == request.email)
+        .filter(func.lower(User.email) == normalized_email)
         .with_for_update()
         .first()
     )

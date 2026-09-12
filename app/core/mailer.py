@@ -32,6 +32,10 @@ def _safe_error_message(message: object) -> str:
     return cleaned[:500]
 
 
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
 def _sender() -> str:
     from_email = settings.RESEND_FROM_EMAIL or settings.MAIL_FROM
     if not from_email:
@@ -43,10 +47,60 @@ def _sender() -> str:
     return f"{from_name} <{from_email}>"
 
 
+def _send_smtp_email(*, email_to: str, subject: str, html: str) -> None:
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    from_email = settings.MAIL_FROM or settings.MAIL_USERNAME or "noreply@scholarai.com"
+    from_name = settings.MAIL_FROM_NAME or "Scholar AI Support"
+    msg["From"] = f"{from_name} <{from_email}>"
+    msg["To"] = email_to
+
+    html_part = MIMEText(html, "html", "utf-8")
+    msg.attach(html_part)
+
+    port = settings.MAIL_PORT or 587
+    server_host = settings.MAIL_SERVER or "smtp.gmail.com"
+
+    try:
+        if port == 465:
+            with smtplib.SMTP_SSL(server_host, port, timeout=10) as server:
+                if settings.MAIL_USERNAME and settings.MAIL_PASSWORD:
+                    server.login(settings.MAIL_USERNAME, settings.MAIL_PASSWORD)
+                server.send_message(msg)
+        else:
+            with smtplib.SMTP(server_host, port, timeout=10) as server:
+                server.ehlo()
+                server.starttls()
+                server.ehlo()
+                if settings.MAIL_USERNAME and settings.MAIL_PASSWORD:
+                    server.login(settings.MAIL_USERNAME, settings.MAIL_PASSWORD)
+                server.send_message(msg)
+    except Exception as exc:
+        raise EmailDeliveryError(
+            _safe_error_message(f"SMTP delivery failed: {exc}"),
+            error_type="smtp_error",
+        ) from None
+
+
 def _send_email(*, email_to: str, subject: str, html: str) -> None:
+    has_smtp = (
+        bool(settings.MAIL_USERNAME)
+        and bool(settings.MAIL_PASSWORD)
+        and settings.MAIL_USERNAME != "test@example.com"
+        and settings.MAIL_PASSWORD != "password"
+    )
+
+    if has_smtp:
+        try:
+            _send_smtp_email(email_to=email_to, subject=subject, html=html)
+            return
+        except EmailDeliveryError:
+            if not settings.RESEND_API_KEY:
+                raise
+
     if not settings.RESEND_API_KEY:
         raise EmailDeliveryError(
-            "Resend API key is not configured",
+            "Neither SMTP nor Resend API key is configured for email delivery",
             error_type="configuration_error",
         )
 
@@ -63,8 +117,12 @@ def _send_email(*, email_to: str, subject: str, html: str) -> None:
     except EmailDeliveryError:
         raise
     except ResendError as exc:
+        msg = str(getattr(exc, "message", exc))
+        if "only send testing emails to your own email address" in msg and has_smtp:
+            _send_smtp_email(email_to=email_to, subject=subject, html=html)
+            return
         raise EmailDeliveryError(
-            _safe_error_message(getattr(exc, "message", exc)),
+            _safe_error_message(msg),
             status_code=getattr(exc, "code", None),
             error_type=getattr(exc, "error_type", None),
         ) from None

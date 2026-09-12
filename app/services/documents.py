@@ -30,15 +30,17 @@ from app.services.s3 import StorageClient
 
 logger = logging.getLogger(__name__)
 
-PDF_TYPES = {".pdf": {"application/pdf"}}
+PDF_TYPES = {".pdf": {"application/pdf", "application/x-pdf", "application/octet-stream"}}
 DOCX_TYPES = {
     ".docx": {
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/msword",
+        "application/octet-stream",
     }
 }
 IMAGE_TYPES = {
-    ".jpg": {"image/jpeg"},
-    ".jpeg": {"image/jpeg"},
+    ".jpg": {"image/jpeg", "image/pjpeg"},
+    ".jpeg": {"image/jpeg", "image/pjpeg"},
     ".png": {"image/png"},
 }
 
@@ -90,6 +92,12 @@ DOCUMENT_RULES: dict[ProfileDocumentType, dict[str, Any]] = {
         "extensions": PDF_TYPES,
         "max_count": 1,
         "slot": "motivation_letter",
+    },
+    ProfileDocumentType.UNIVERSITY_ADMISSION_LETTER: {
+        "extensions": {**PDF_TYPES, **IMAGE_TYPES},
+        "max_count": 1,
+        "slot": "university_admission_letter",
+        "max_bytes": 10 * 1024 * 1024,
     },
 }
 
