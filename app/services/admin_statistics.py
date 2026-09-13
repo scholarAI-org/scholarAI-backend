@@ -1,15 +1,17 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from itertools import pairwise
 
-from sqlalchemy import and_, case, func
+from sqlalchemy import and_, case, func, or_
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.models import Scholarship
+from app.models.audit_log import AuditLog
 from app.models.user import User
 from app.schemas.admin import (
     AdminMonthlyActivityItem,
     AdminMonthlyActivityResponse,
+    PendingScholarshipReviewStatisticsResponse,
     ScholarshipReviewStatus,
 )
 
@@ -17,6 +19,62 @@ MONTH_NAMES = (
     "January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December",
 )
+
+
+def get_pending_review_statistics(
+    db: Session,
+) -> PendingScholarshipReviewStatisticsResponse:
+    """Count existing scholarships across all sources, from Monday UTC to now."""
+    now = datetime.now(timezone.utc)
+    week_start = (now - timedelta(days=now.weekday())).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    # Both approval routes log publish; approve is also a supported audit action.
+    # One row per scholarship prevents repeat approvals multiplying the counts.
+    approvals = (
+        db.query(
+            AuditLog.entity_id.label("scholarship_id"),
+            func.max(AuditLog.created_at).label("approved_at"),
+        )
+        .filter(
+            AuditLog.entity_type == "scholarship",
+            AuditLog.action.in_(("publish", "approve")),
+        )
+        .group_by(AuditLog.entity_id)
+        .subquery()
+    )
+    # Legacy approvals may predate audit logging. Never use updated_at or scraped_at.
+    approval_date = func.coalesce(approvals.c.approved_at, Scholarship.reviewed_at)
+    pending = Scholarship.status == ScholarshipReviewStatus.PENDING.value
+    approved_this_week = and_(
+        Scholarship.status == ScholarshipReviewStatus.APPROVED.value,
+        approval_date >= week_start,
+        approval_date <= now,
+    )
+    reviewed_this_week = and_(
+        Scholarship.status.in_((
+            ScholarshipReviewStatus.APPROVED.value,
+            ScholarshipReviewStatus.REJECTED.value,
+        )),
+        Scholarship.reviewed_at >= week_start,
+        Scholarship.reviewed_at <= now,
+    )
+    missing_source_url = or_(
+        Scholarship.source_url.is_(None),
+        func.trim(Scholarship.source_url, " \t\n\r\f\v") == "",
+    )
+    counts = (
+        db.query(
+            func.count(case((pending, 1))).label("pending_count"),
+            func.count(case((approved_this_week, 1))).label("approved_this_week"),
+            func.count(case((reviewed_this_week, 1))).label("reviewed_this_week"),
+            func.count(case((missing_source_url, 1))).label("missing_source_url_count"),
+        )
+        .select_from(Scholarship)
+        .outerjoin(approvals, approvals.c.scholarship_id == Scholarship.id)
+        .one()
+    )
+    return PendingScholarshipReviewStatisticsResponse(**counts._mapping)
 
 
 def _monthly_counts(

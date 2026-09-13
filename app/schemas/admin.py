@@ -83,6 +83,13 @@ class AdminDashboardStatistics(BaseModel):
     users: int = Field(ge=0)
 
 
+class PendingScholarshipReviewStatisticsResponse(BaseModel):
+    pending_count: int = Field(ge=0)
+    approved_this_week: int = Field(ge=0)
+    reviewed_this_week: int = Field(ge=0)
+    missing_source_url_count: int = Field(ge=0)
+
+
 class AdminMonthlyActivityItem(BaseModel):
     year: int
     month: int = Field(ge=1, le=12)

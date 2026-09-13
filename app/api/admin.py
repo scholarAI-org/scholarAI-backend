@@ -27,6 +27,7 @@ from app.schemas.admin import (
     AuditLogItem,
     DashboardAuditLogsResponse,
     DuplicateCandidateItem,
+    PendingScholarshipReviewStatisticsResponse,
     ScholarshipActionResponse,
     ScholarshipApproveRequest,
     ScholarshipApproveResponse,
@@ -43,13 +44,44 @@ from app.services.admin_notifications import (
     filtered_notifications,
     mark_notification_read,
 )
-from app.services.admin_statistics import get_monthly_activity_statistics
+from app.services.admin_statistics import (
+    get_monthly_activity_statistics,
+    get_pending_review_statistics,
+)
 from app.services.audit import create_audit_log
 from app.services.avatar import avatar_presigned_url
 from app.services.duplicate_detection import find_duplicate_candidates
 from app.services.s3 import StorageClient, get_s3_storage
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
+
+
+@router.get(
+    "/scholarships/review/statistics",
+    response_model=PendingScholarshipReviewStatisticsResponse,
+    summary="Get pending scholarship review statistics",
+    description=(
+        "Counts existing scholarships across all sources. Weekly counts run from "
+        "Monday 00:00 UTC through now. Approval uses the latest approval audit date, "
+        "falling back to reviewed_at for legacy records. Reviewed means currently "
+        "approved or rejected with reviewed_at this week. Missing source URLs are "
+        "counted across all statuses. Undated reviews are excluded from weekly counts."
+    ),
+    responses={
+        401: {"description": "Missing or invalid authentication"},
+        403: {"description": "Requires admin role"},
+    },
+)
+def get_scholarship_review_statistics(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> PendingScholarshipReviewStatisticsResponse:
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This operation is restricted to administrators.",
+        )
+    return get_pending_review_statistics(db)
 
 
 @router.get(
