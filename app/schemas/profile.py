@@ -8,6 +8,7 @@ from pydantic import (
     ConfigDict,
     EmailStr,
     Field,
+    JsonValue,
     StringConstraints,
     ValidationError,
     field_validator,
@@ -295,6 +296,9 @@ class Documents(BaseModel):
     recommendation_letters: List[UploadedFile] = Field(default_factory=list)
     english_test: UploadedFile = Field(default_factory=UploadedFile)
     motivation_letter: UploadedFile = Field(default_factory=UploadedFile)
+    university_admission_letter: UploadedFile = Field(
+        default_factory=UploadedFile, title="University Admission Letter"
+    )
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -448,6 +452,51 @@ class ProfileUpdate(BaseModel):
     documents: Optional[Documents] = None
     skills_and_languages: Optional[SkillsAndLanguages] = None
     preferences: Optional[PreferencesUpdate] = None
+
+
+class ProfileSummaryResponse(BaseModel):
+    """Stored profile fields only; draft values remain nullable."""
+
+    first_name: str | None = None
+    last_name: str | None = None
+    nationality: str | None = None
+    country_of_residence: str | None = None
+    academic_level: AcademicLevel | None = None
+    study_status: StudyStatus | None = None
+    field_of_study: str | None = None
+    detailed_specialization: str | None = None
+    institution: str | None = None
+    gpa_value: float | None = None
+    gpa_scale: GPAScale | None = None
+    current_study_language: list[str] | None = None
+    expected_graduation_year: int | None = None
+    desired_degree_level: DesiredDegreeLevel | None = None
+    target_field_of_study: str | None = None
+    research_specialization: str | None = None
+    languages_data: list[dict[str, JsonValue]] | None = None
+    skills_data: list[str] | None = None
+    has_experience: bool | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ProfileExperienceResponse(BaseModel):
+    """Read stored experiences without applying creation-time validation."""
+
+    experience_type: ExperienceType
+    title: str
+    organization: str
+    start_date: date
+    end_date: date | None = None
+    is_current: bool | None = None
+    description: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ProfileWithExperienceResponse(BaseModel):
+    profile: ProfileSummaryResponse
+    experiences: list[ProfileExperienceResponse]
 
 
 class UserProfile(BaseModel):

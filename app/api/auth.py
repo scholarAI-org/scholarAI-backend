@@ -1,6 +1,7 @@
 import logging
 import secrets
 from datetime import timedelta
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -11,7 +12,7 @@ from app.core.database import get_db
 from app.models.user import User
 from app.models.auth_account import AuthAccount
 from app.schemas.user import (
-    UserCreate, UserLogin, Token,
+    UserCreate, UserLogin, LoginResponse, CurrentUserResponse,
     ForgotPasswordRequest, ResetPasswordRequest, ChangePasswordRequest,
     MessageResponse, VerifyEmailRequest, ResendVerificationOtpRequest,
     GoogleAuthRequest, GoogleAuthResponse,
@@ -151,9 +152,10 @@ def _complete_registration_without_verification(user: User, db: Session) -> None
     },
 )
 def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
+    normalized_email = user_data.email.lower().strip()
     existing_user = (
         db.query(User)
-        .filter(User.email == user_data.email)
+        .filter(func.lower(User.email) == normalized_email)
         .with_for_update()
         .first()
     )
@@ -239,11 +241,11 @@ def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
 
 @router.post(
     '/login',
-    response_model=Token,
+    response_model=LoginResponse,
     summary='Login',
     description=(
         'JSON body with `email` and `password`. '
-        'The email must be verified before login.'
+        'The email must be verified before login. Returns a Bearer token and the user role.'
     ),
     responses={
         401: {"description": "Invalid email or password"},
@@ -255,9 +257,10 @@ def login_user(
     user_data: UserLogin,
     db: Session = Depends(get_db)
 ):
+    normalized_email = user_data.email.lower().strip()
     user = (
         db.query(User)
-        .filter(User.email == user_data.email)
+        .filter(func.lower(User.email) == normalized_email)
         .first()
     )
 
@@ -277,7 +280,17 @@ def login_user(
         )
 
     access_token = create_access_token(data={'sub': str(user.id), 'role': user.role})
-    return {'access_token': access_token, 'token_type': 'bearer'}
+    return {'access_token': access_token, 'token_type': 'bearer', 'role': user.role}
+
+
+@router.get(
+    "/me",
+    response_model=CurrentUserResponse,
+    summary="Get the current authenticated user",
+    responses={401: {"description": "Missing or invalid Bearer token"}},
+)
+def get_me(current_user: Annotated[User, Depends(get_current_user)]):
+    return current_user
 
 
 @router.post(
@@ -378,9 +391,10 @@ def google_auth(request: GoogleAuthRequest, db: Session = Depends(get_db)):
 
 @router.post('/verify-email', response_model=MessageResponse)
 def verify_email(request: VerifyEmailRequest, db: Session = Depends(get_db)):
+    normalized_email = request.email.lower().strip()
     user = (
         db.query(User)
-        .filter(User.email == request.email)
+        .filter(func.lower(User.email) == normalized_email)
         .with_for_update()
         .first()
     )
@@ -426,9 +440,10 @@ def resend_verification_otp(
     request: ResendVerificationOtpRequest,
     db: Session = Depends(get_db),
 ):
+    normalized_email = request.email.lower().strip()
     user = (
         db.query(User)
-        .filter(User.email == request.email)
+        .filter(func.lower(User.email) == normalized_email)
         .with_for_update()
         .first()
     )
@@ -455,6 +470,18 @@ def resend_verification_otp(
     return {"message": "Verification OTP sent to your email"}
 
 
+def _safe_send_reset_password_email(email: str, token: str) -> None:
+    try:
+        send_reset_password_email(email, token)
+    except Exception as exc:
+        logger.error(
+            "Password reset email failed for email=%s error_type=%s message=%s",
+            email,
+            type(exc).__name__,
+            str(exc),
+        )
+
+
 @router.post(
     '/forgot-password',
     response_model=MessageResponse,
@@ -465,11 +492,12 @@ async def forgot_password(
     background_tasks: BackgroundTasks, 
     db: Session = Depends(get_db)
 ):
-    user = db.query(User).filter(User.email == request.email).first()
+    normalized_email = request.email.lower().strip()
+    user = db.query(User).filter(func.lower(User.email) == normalized_email).first()
     if user:
         reset_token = create_reset_token(email=user.email)
         # إرسال الإيميل في الخلفية لعدم إبطاء الـ API
-        background_tasks.add_task(send_reset_password_email, user.email, reset_token)
+        background_tasks.add_task(_safe_send_reset_password_email, user.email, reset_token)
     
     return {'message': 'إذا كان البريد مسجلاً، فقد تم إرسال رابط إعادة التعيين إلى إيميلك.'}
 
@@ -490,7 +518,7 @@ def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db))
             detail='الرمز غير صالح أو انتهت صلاحيته!'
         )
     
-    user = db.query(User).filter(User.email == email).first()
+    user = db.query(User).filter(func.lower(User.email) == email.lower().strip()).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='المستخدم غير موجود')
     

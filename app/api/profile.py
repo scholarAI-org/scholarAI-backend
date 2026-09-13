@@ -1,8 +1,8 @@
-from typing import List, Optional
+from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
 from app.core.database import get_db
@@ -28,6 +28,7 @@ from app.schemas.profile import (
     PersonalInfo,
     PreferencesResponse,
     PreferencesUpdate,
+    ProfileWithExperienceResponse,
     SkillsAndLanguages,
     SkillsAndLanguagesSuggestions,
     UploadedFile,
@@ -52,6 +53,25 @@ from app.services.preferences import preferences_response, save_preferences
 from app.services.s3 import StorageClient, get_s3_storage
 
 router = APIRouter(prefix="/profile", tags=["Profile"])
+
+
+@router.get("/profile-with-experience", response_model=ProfileWithExperienceResponse)
+def get_profile_with_experience(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    profile = (
+        db.query(Profile)
+        .options(joinedload(Profile.experiences))
+        .filter(Profile.user_id == current_user.id)
+        .first()
+    )
+    if profile is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found"
+        )
+
+    return {"profile": profile, "experiences": profile.experiences}
 
 
 # ==========================================

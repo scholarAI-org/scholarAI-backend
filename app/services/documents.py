@@ -30,19 +30,39 @@ from app.services.s3 import StorageClient
 
 logger = logging.getLogger(__name__)
 
-PDF_TYPES = {".pdf": {"application/pdf"}}
+PDF_TYPES = {
+    ".pdf": {
+        "application/pdf",
+        "application/x-pdf",
+        "application/acrobat",
+        "application/x-acrobat",
+        "applications/vnd.pdf",
+        "text/pdf",
+        "application/octet-stream",
+    }
+}
 DOCX_TYPES = {
     ".docx": {
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/msword",
+        "application/x-msword",
+        "application/octet-stream",
     }
 }
 IMAGE_TYPES = {
-    ".jpg": {"image/jpeg"},
-    ".jpeg": {"image/jpeg"},
-    ".png": {"image/png"},
+    ".jpg": {"image/jpeg", "image/jpg", "image/pjpeg"},
+    ".jpeg": {"image/jpeg", "image/jpg", "image/pjpeg"},
+    ".png": {"image/png", "image/x-png"},
 }
 
 DOCUMENT_RULES: dict[ProfileDocumentType, dict[str, Any]] = {
+    ProfileDocumentType.UNIVERSITY_ADMISSION_LETTER: {
+        "extensions": {**PDF_TYPES, **IMAGE_TYPES},
+        "max_count": 1,
+        "slot": "university_admission_letter",
+        "max_bytes": 10 * 1024 * 1024,
+        "is_improvable": False,
+    },
     ProfileDocumentType.CV: {
         "extensions": {**PDF_TYPES, **DOCX_TYPES},
         "max_bytes": 5 * 1024 * 1024,
@@ -100,12 +120,13 @@ def _as_utc(value: datetime) -> datetime:
 
 
 def sanitize_file_name(file_name: str) -> str:
-    name = Path(file_name.replace("\\", "/")).name.strip()
-    name = unicodedata.normalize("NFKC", name)
-    name = UNSAFE_FILENAME_CHARS.sub("_", name).strip("._")
-    if not name:
-        name = "document"
-    return name[:255]
+    path = Path(file_name.replace("\\", "/"))
+    suffix = path.suffix.lower()
+    raw_stem = unicodedata.normalize("NFKC", path.stem).strip()
+    safe_stem = UNSAFE_FILENAME_CHARS.sub("_", raw_stem).strip("._")
+    if not safe_stem:
+        safe_stem = "document"
+    return f"{safe_stem[:200]}{suffix}"
 
 
 def _extension_for(file_name: str) -> str:
@@ -196,6 +217,7 @@ def _empty_documents() -> dict[str, Any]:
         "passport": _empty_slot("passport"),
         "english_test": _empty_slot("english_test"),
         "motivation_letter": _empty_slot("motivation_letter"),
+        "university_admission_letter": _empty_slot("university_admission_letter"),
         "recommendation_letters": [],
     }
 
@@ -225,6 +247,7 @@ def load_documents_dict(profile: Optional[Profile]) -> dict[str, Any]:
         "graduation_certificate",
         "passport",
         "english_test",
+        "university_admission_letter",
     ):
         if isinstance(stored.get(key), dict):
             merged = {**base[key], **stored[key]}
@@ -251,6 +274,7 @@ def _iter_stored_documents(data: dict[str, Any]):
         "graduation_certificate",
         "passport",
         "english_test",
+        "university_admission_letter",
     ):
         item = data.get(key) or {}
         if isinstance(item, dict):
