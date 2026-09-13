@@ -1,12 +1,14 @@
+from typing import cast
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func
-from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
-from typing import Optional
+from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models import Scholarship
+from app.models.admin_notification import NotificationActionType, NotificationType
 from app.models.user import User
 from app.schemas import (
     RecommendationScholarshipResponse,
@@ -15,6 +17,8 @@ from app.schemas import (
     ScholarshipResponse,
     ScholarshipStatusDistribution,
 )
+from app.services.admin_notifications import create_admin_notification
+from app.services.audit import create_audit_log
 
 router = APIRouter(prefix="/api/scholarships", tags=["Scholarships"])
 
@@ -145,8 +149,33 @@ def create_scholarship(
     
     try:
         db.add(new_scholarship)
-        db.commit()
-        db.refresh(new_scholarship)
+        db.flush()
+        if (
+            new_scholarship.source in {"for9a", "ministry"}
+            and new_scholarship.status == "pending"
+        ):
+            create_admin_notification(
+                db,
+                notification_type=NotificationType.SCHOLARSHIP_REVIEW,
+                title="New scholarship pending review",
+                message=f'New aggregated scholarship "{new_scholarship.title}" requires review.',
+                related_entity_id=cast(int, new_scholarship.id),
+                action_type=NotificationActionType.OPEN_SCHOLARSHIP_REVIEW,
+                event_key=f"scholarship:{new_scholarship.id}:pending",
+            )
+        # The audit helper commits the scholarship, notification, and audit together.
+        create_audit_log(
+            db=db,
+            admin=current_user,
+            action="create",
+            action_display="إضافة منحة",
+            entity_name=new_scholarship.title,
+            entity_id=new_scholarship.id,
+            details={
+                "source": new_scholarship.source,
+                "country": new_scholarship.country,
+            },
+        )
         return new_scholarship
     except IntegrityError:
         db.rollback()
@@ -154,3 +183,6 @@ def create_scholarship(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="خطأ في قيد البيانات أو أنها مكررة."
         )
+    except Exception:
+        db.rollback()
+        raise

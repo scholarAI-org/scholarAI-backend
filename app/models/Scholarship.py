@@ -3,11 +3,14 @@ from sqlalchemy import (
     Column,
     Date,
     DateTime,
+    ForeignKey,
     Index,
     Integer,
+    JSON,
     String,
     Text,
     UniqueConstraint,
+    func,
 )
 from sqlalchemy.dialects.postgresql import ARRAY
 
@@ -81,6 +84,28 @@ class Scholarship(Base):
         comment="True when the ministry listing extends an existing scholarship.",
     )
 
+    # Academic & Funding details
+    study_level = Column(
+        String(100),
+        nullable=True,
+        comment="المستوى الدراسي: بكالوريوس، ماجستير، دكتوراه",
+    )
+    funding_type = Column(
+        String(100),
+        nullable=True,
+        comment="التغطية المالية: ممولة بالكامل، راتب شهري + رسوم",
+    )
+    majors = Column(
+        JSON,
+        nullable=True,
+        comment="التخصصات المتاحة",
+    )
+    required_documents = Column(
+        JSON,
+        nullable=True,
+        comment="المستندات المطلوبة: خطاب دافع، CV",
+    )
+
     # Review workflow
     status = Column(
         String(20),
@@ -91,3 +116,21 @@ class Scholarship(Base):
     scraped_at = Column(DateTime(timezone=True), nullable=True, comment="When the listing was scraped.")
     reviewed_at = Column(DateTime(timezone=True), nullable=True, comment="When a reviewer last acted on the listing.")
     reviewed_by = Column(String(100), nullable=True, comment="Reviewer identifier (email or username).")
+    rejection_reason = Column(Text, nullable=True, comment="سبب رفض المنحة")
+    admin_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="معرف المشرف المسؤول عن المراجعة أو الرفض",
+    )
+    rejected_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="تاريخ ووقت رفض المنحة",
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+        onupdate=func.now(),
+        comment="وقت آخر تحديث للبيانات",
+    )
