@@ -1,6 +1,7 @@
 import logging
 import secrets
 from datetime import timedelta
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -11,7 +12,7 @@ from app.core.database import get_db
 from app.models.user import User
 from app.models.auth_account import AuthAccount
 from app.schemas.user import (
-    UserCreate, UserLogin, Token,
+    UserCreate, UserLogin, LoginResponse, CurrentUserResponse,
     ForgotPasswordRequest, ResetPasswordRequest, ChangePasswordRequest,
     MessageResponse, VerifyEmailRequest, ResendVerificationOtpRequest,
     GoogleAuthRequest, GoogleAuthResponse,
@@ -240,11 +241,11 @@ def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
 
 @router.post(
     '/login',
-    response_model=Token,
+    response_model=LoginResponse,
     summary='Login',
     description=(
         'JSON body with `email` and `password`. '
-        'The email must be verified before login.'
+        'The email must be verified before login. Returns a Bearer token and the user role.'
     ),
     responses={
         401: {"description": "Invalid email or password"},
@@ -279,7 +280,17 @@ def login_user(
         )
 
     access_token = create_access_token(data={'sub': str(user.id), 'role': user.role})
-    return {'access_token': access_token, 'token_type': 'bearer'}
+    return {'access_token': access_token, 'token_type': 'bearer', 'role': user.role}
+
+
+@router.get(
+    "/me",
+    response_model=CurrentUserResponse,
+    summary="Get the current authenticated user",
+    responses={401: {"description": "Missing or invalid Bearer token"}},
+)
+def get_me(current_user: Annotated[User, Depends(get_current_user)]):
+    return current_user
 
 
 @router.post(
