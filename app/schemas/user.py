@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, EmailStr, field_validator, Field
-from typing import Optional
+from typing import Literal, Optional
 import re
 
 PASSWORD_DESCRIPTION = (
@@ -79,6 +79,19 @@ class UserLogin(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class LoginResponse(Token):
+    role: Literal["student", "admin"]
+
+
+class CurrentUserResponse(BaseModel):
+    id: int
+    email: EmailStr
+    name: str = Field(validation_alias="full_name")
+    role: Literal["student", "admin"]
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class GoogleAuthRequest(BaseModel):
