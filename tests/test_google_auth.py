@@ -59,16 +59,24 @@ class GoogleAuthTests(unittest.TestCase):
         with patch("app.api.auth.verify_google_id_token", return_value=identity):
             return self.client.post("/auth/google", json={"credential": "mock-id-token"})
 
-    def test_new_google_user_gets_profile_and_application_jwt(self):
+    def test_new_google_user_gets_profile_and_application_cookie(self):
         response = self.authenticate()
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["token_type"], "bearer")
-        self.assertEqual(response.json()["user"]["email"], "student@example.com")
-        token = response.json()["access_token"]
-        protected = self.client.get(
-            "/profile/personal-info", headers={"Authorization": f"Bearer {token}"}
-        )
+        data = response.json()
+
+        # Token must NOT appear in the response body
+        self.assertNotIn("access_token", data)
+        self.assertNotIn("token_type", data)
+
+        # User data is returned in the body
+        self.assertEqual(data["user"]["email"], "student@example.com")
+
+        # The HttpOnly cookie must be set
+        self.assertIn("access_token", self.client.cookies)
+
+        # Cookie is usable to access protected endpoints
+        protected = self.client.get("/profile/personal-info")
         self.assertNotEqual(protected.status_code, 401)
 
         with self.Session() as db:

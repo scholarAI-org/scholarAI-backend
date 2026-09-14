@@ -125,6 +125,7 @@ class AdminAuditLoggingActionsTests(unittest.TestCase):
                     "funding_type TEXT, "
                     "majors JSON, "
                     "required_documents JSON, "
+                    "eligibility_criteria JSON, "
                     "status TEXT DEFAULT 'pending', "
                     "scraped_at TIMESTAMP, "
                     "reviewed_at TIMESTAMP, "
@@ -137,7 +138,9 @@ class AdminAuditLoggingActionsTests(unittest.TestCase):
                 )
             )
 
+        from app.models.auth_account import AuthAccount
         User.__table__.create(self.engine)
+        AuthAccount.__table__.create(self.engine)
         AuditLog.__table__.create(self.engine)
         AdminNotification.__table__.create(self.engine)
 

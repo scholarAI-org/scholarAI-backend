@@ -15,6 +15,7 @@ os.environ.setdefault("SECRET_KEY", "academic-info-test-secret-key-at-least-32-b
 from app.api.profile import router
 from app.core.database import get_db
 from app.core.security import create_access_token
+from app.models.auth_account import AuthAccount
 from app.models.profile import Experience, Profile
 from app.models.user import User
 from app.services.s3 import get_s3_storage
@@ -70,7 +71,7 @@ def api(request):
             connect_args={"check_same_thread": False},
             poolclass=StaticPool,
         )
-        for model in (User, Profile, Experience):
+        for model in (User, Profile, Experience, AuthAccount):
             model.__table__.create(engine)
     else:
         # This database must already have been upgraded via Alembic; never

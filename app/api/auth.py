@@ -3,7 +3,7 @@ import secrets
 from datetime import timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status, BackgroundTasks
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -39,6 +39,48 @@ from app.services.google_auth import GoogleCredentialError, verify_google_id_tok
 router = APIRouter(prefix='/auth', tags=['Authentication'])
 logger = logging.getLogger("uvicorn.error")
 
+
+# ---------------------------------------------------------------------------
+# Cookie helpers
+# ---------------------------------------------------------------------------
+
+def _set_auth_cookie(response: Response, token: str) -> None:
+    """
+    Attach the JWT access token as an HttpOnly cookie.
+
+    Flags:
+      - httponly=True  — JS cannot read this cookie (XSS protection)
+      - secure         — HTTPS-only in production, HTTP allowed in dev
+      - samesite       — 'none' in production (cross-origin Vercel↔Railway),
+                         'lax'  in development (localhost)
+    """
+    is_prod = settings.ENVIRONMENT == "production"
+    response.set_cookie(
+        key=settings.COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=is_prod,
+        samesite="none" if is_prod else "lax",
+        max_age=settings.COOKIE_MAX_AGE,
+        path="/",
+    )
+
+
+def _clear_auth_cookie(response: Response) -> None:
+    """Remove the auth cookie by expiring it immediately."""
+    is_prod = settings.ENVIRONMENT == "production"
+    response.delete_cookie(
+        key=settings.COOKIE_NAME,
+        path="/",
+        httponly=True,
+        secure=is_prod,
+        samesite="none" if is_prod else "lax",
+    )
+
+
+# ---------------------------------------------------------------------------
+# OTP / email verification helpers (unchanged)
+# ---------------------------------------------------------------------------
 
 def _otp_retry_after(user: User, now) -> int | None:
     if not user.email_verification_otp_sent_at:
@@ -135,6 +177,10 @@ def _complete_registration_without_verification(user: User, db: Session) -> None
             detail="Could not create the account due to a database error",
         ) from exc
 
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
 
 @router.post(
     '/register',
@@ -245,7 +291,9 @@ def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
     summary='Login',
     description=(
         'JSON body with `email` and `password`. '
-        'The email must be verified before login. Returns a Bearer token and the user role.'
+        'On success, sets a secure HttpOnly cookie containing the JWT access token. '
+        'Returns only the user role in the response body — the token is NOT exposed '
+        'to the frontend.'
     ),
     responses={
         401: {"description": "Invalid email or password"},
@@ -254,8 +302,9 @@ def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
     },
 )
 def login_user(
+    response: Response,
     user_data: UserLogin,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     normalized_email = user_data.email.lower().strip()
     user = (
@@ -269,10 +318,10 @@ def login_user(
         user.hashed_password
     ):
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, 
+            status_code=status.HTTP_401_UNAUTHORIZED,
             detail='البريد الإلكتروني أو كلمة المرور غير صحيحة'
         )
-    
+
     if settings.EMAIL_VERIFICATION_ENABLED and not user.is_email_verified:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -280,14 +329,23 @@ def login_user(
         )
 
     access_token = create_access_token(data={'sub': str(user.id), 'role': user.role})
-    return {'access_token': access_token, 'token_type': 'bearer', 'role': user.role}
+
+    # Set the token as a secure HttpOnly cookie — NOT returned in the body
+    _set_auth_cookie(response, access_token)
+
+    return {'role': user.role}
 
 
 @router.get(
     "/me",
     response_model=CurrentUserResponse,
     summary="Get the current authenticated user",
-    responses={401: {"description": "Missing or invalid Bearer token"}},
+    description=(
+        "Returns id, email, name, and role for the currently authenticated user. "
+        "Authentication is read from the HttpOnly session cookie (set by /auth/login). "
+        "Falls back to Authorization: Bearer <token> for API/test clients."
+    ),
+    responses={401: {"description": "Missing or invalid authentication"}},
 )
 def get_me(current_user: Annotated[User, Depends(get_current_user)]):
     return current_user
@@ -297,6 +355,11 @@ def get_me(current_user: Annotated[User, Depends(get_current_user)]):
     "/google",
     response_model=GoogleAuthResponse,
     summary="Sign up or log in with Google",
+    description=(
+        "Verifies a Google OpenID Connect ID token. "
+        "On success, sets a secure HttpOnly cookie and returns the user object. "
+        "The JWT access token is NOT included in the response body."
+    ),
     responses={
         401: {"description": "Invalid Google credential"},
         403: {"description": "Application account disabled"},
@@ -304,7 +367,7 @@ def get_me(current_user: Annotated[User, Depends(get_current_user)]):
         503: {"description": "Google login unavailable or database error"},
     },
 )
-def google_auth(request: GoogleAuthRequest, db: Session = Depends(get_db)):
+def google_auth(response: Response, request: GoogleAuthRequest, db: Session = Depends(get_db)):
     try:
         identity = verify_google_id_token(request.credential)
     except GoogleCredentialError as exc:
@@ -386,7 +449,11 @@ def google_auth(request: GoogleAuthRequest, db: Session = Depends(get_db)):
         ) from exc
 
     access_token = create_access_token(data={"sub": str(user.id), "role": user.role})
-    return {"access_token": access_token, "token_type": "bearer", "user": user}
+
+    # Set the token as a secure HttpOnly cookie — NOT returned in the body
+    _set_auth_cookie(response, access_token)
+
+    return {"user": user}
 
 
 @router.post('/verify-email', response_model=MessageResponse)
@@ -488,8 +555,8 @@ def _safe_send_reset_password_email(email: str, token: str) -> None:
     summary='Request password reset email',
 )
 async def forgot_password(
-    request: ForgotPasswordRequest, 
-    background_tasks: BackgroundTasks, 
+    request: ForgotPasswordRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
     normalized_email = request.email.lower().strip()
@@ -498,8 +565,9 @@ async def forgot_password(
         reset_token = create_reset_token(email=user.email)
         # إرسال الإيميل في الخلفية لعدم إبطاء الـ API
         background_tasks.add_task(_safe_send_reset_password_email, user.email, reset_token)
-    
+
     return {'message': 'إذا كان البريد مسجلاً، فقد تم إرسال رابط إعادة التعيين إلى إيميلك.'}
+
 
 @router.post(
     '/reset-password',
@@ -514,17 +582,18 @@ def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db))
     email = verify_reset_token(request.token)
     if not email:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, 
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail='الرمز غير صالح أو انتهت صلاحيته!'
         )
-    
+
     user = db.query(User).filter(func.lower(User.email) == email.lower().strip()).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='المستخدم غير موجود')
-    
+
     user.hashed_password = hash_password(request.new_password)
     db.commit()
     return {'message': 'تم تغيير كلمة المرور بنجاح! يمكنك الآن تسجيل الدخول.'}
+
 
 @router.post(
     '/change-password',
@@ -532,7 +601,7 @@ def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db))
     summary='Change password (authenticated)',
     responses={
         400: {"description": "Old password is incorrect"},
-        401: {"description": "Missing or invalid Bearer token"},
+        401: {"description": "Missing or invalid authentication"},
     },
 )
 def change_password(
@@ -545,7 +614,7 @@ def change_password(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="كلمة المرور القديمة غير صحيحة"
         )
-    
+
     current_user.hashed_password = hash_password(data.new_password)
     db.commit()
     return {'message': 'تم تغيير كلمة المرور بنجاح!'}
@@ -554,11 +623,12 @@ def change_password(
 @router.post(
     '/logout',
     response_model=MessageResponse,
-    summary='Logout (authenticated)',
-    description='Logs out the current authenticated user.',
-    responses={
-        401: {"description": "Missing or invalid Bearer token"},
-    },
+    summary='Logout',
+    description=(
+        'Clears the HttpOnly session cookie. '
+        'Safe to call even if the user is not currently authenticated.'
+    ),
 )
-def logout_user(current_user: User = Depends(get_current_user)):
+def logout_user(response: Response):
+    _clear_auth_cookie(response)
     return {'message': 'تم تسجيل الخروج بنجاح!'}

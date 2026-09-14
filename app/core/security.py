@@ -4,6 +4,7 @@ import jwt
 from typing import Optional
 
 from fastapi import Depends, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.config import settings
@@ -80,14 +81,18 @@ def _decode_token(token: str) -> dict:
         raise credentials_exception from exc
 
 
+oauth2_scheme = HTTPBearer(auto_error=False)
+
+
 def get_current_user(
     request: Request,
+    bearer: Optional[HTTPAuthorizationCredentials] = Depends(oauth2_scheme),
     db: Session = Depends(get_db),
 ) -> User:
     """
     Resolve the authenticated user from:
       1. HttpOnly cookie  (primary — browser clients after login)
-      2. Authorization: Bearer <token>  (fallback — direct API / test clients)
+      2. Authorization: Bearer <token>  (fallback — direct API / test clients / OpenAPI)
 
     Raises HTTP 401 if neither is present or the token is invalid/expired.
     """
@@ -100,8 +105,10 @@ def get_current_user(
     # ── 1. Cookie (HttpOnly, set by /auth/login or /auth/google) ──────────
     token: Optional[str] = request.cookies.get(settings.COOKIE_NAME)
 
-    # ── 2. Bearer header fallback (API clients, automated tests) ─────────
-    if not token:
+    # ── 2. Bearer header fallback (API clients, automated tests, Swagger) ─
+    if not token and bearer:
+        token = bearer.credentials
+    elif not token:
         auth_header = request.headers.get("Authorization", "")
         if auth_header.startswith("Bearer "):
             token = auth_header[7:]

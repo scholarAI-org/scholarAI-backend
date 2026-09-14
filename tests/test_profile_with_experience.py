@@ -14,6 +14,7 @@ os.environ.setdefault("SECRET_KEY", "profile-with-experience-test-key-at-least-3
 from app.api.profile import router
 from app.core.database import get_db
 from app.core.security import create_access_token
+from app.models.auth_account import AuthAccount
 from app.models.profile import Experience, Profile
 from app.models.user import User
 
@@ -50,7 +51,7 @@ def api():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    for model in (User, Profile, Experience):
+    for model in (User, Profile, Experience, AuthAccount):
         model.__table__.create(engine)
     sessions = sessionmaker(bind=engine)
     with sessions() as db:

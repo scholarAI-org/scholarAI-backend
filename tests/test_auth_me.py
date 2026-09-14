@@ -51,14 +51,20 @@ def api(monkeypatch):
 
     app.dependency_overrides[get_db] = override_db
     try:
-        with TestClient(app) as client:
+        with TestClient(app, raise_server_exceptions=True) as client:
             yield client, sessions
     finally:
         engine.dispose()
 
 
 @pytest.mark.parametrize(("user_id", "role"), [(1, "student"), (2, "admin")])
-def test_login_returns_role_and_token_can_fetch_exact_current_user(api, user_id, role):
+def test_login_sets_cookie_and_returns_role(api, user_id, role):
+    """
+    POST /auth/login should:
+      - Return only { role } in the body (no token in body).
+      - Set an HttpOnly cookie named 'access_token'.
+      - Allow /auth/me to be accessed using that cookie.
+    """
     client = api[0]
     login = client.post(
         "/auth/login",
@@ -66,23 +72,36 @@ def test_login_returns_role_and_token_can_fetch_exact_current_user(api, user_id,
     )
     assert login.status_code == 200, login.text
     data = login.json()
-    assert set(data) == {"access_token", "token_type", "role"}
-    assert data["token_type"] == "bearer"
-    assert data["role"] == role
-    claims = jwt.decode(data["access_token"], SECRET_KEY, algorithms=[ALGORITHM])
-    assert claims["sub"] == str(user_id)
-    assert claims["role"] == role
 
-    response = client.get(
-        "/auth/me", headers={"Authorization": f"Bearer {data['access_token']}"}
-    )
-    assert response.status_code == 200, response.text
-    assert response.json() == {
+    # Token must NOT be in the response body
+    assert "access_token" not in data
+    assert "token_type" not in data
+    assert data["role"] == role
+
+    # Cookie must be set on the client
+    assert settings.COOKIE_NAME in client.cookies
+
+    # /auth/me must work using the cookie (no explicit Authorization header)
+    me = client.get("/auth/me")
+    assert me.status_code == 200, me.text
+    assert me.json() == {
         "id": user_id,
         "email": f"{role}@example.com",
         "name": f"Ahmed {role}",
         "role": role,
     }
+
+
+def test_me_via_bearer_fallback(api):
+    """
+    /auth/me must still work when a valid Bearer token is sent directly
+    (fallback for direct API / test clients).
+    """
+    client = api[0]
+    token = create_access_token({"sub": "1", "role": "student"})
+    response = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200
+    assert response.json()["id"] == 1
 
 
 def test_me_uses_current_database_values_and_ignores_client_selected_user(api):
@@ -119,11 +138,32 @@ def test_me_rejects_missing_or_invalid_authentication(api, kind):
             "unknown_user": create_access_token({"sub": "999"}),
         }
         headers = {"Authorization": f"Bearer {tokens[kind]}"}
+
+    # Ensure no cookie is set for this sub-test
+    client.cookies.clear()
     response = client.get("/auth/me", headers=headers)
-    existing = client.post("/auth/logout", headers=headers)
     assert response.status_code in {401, 403}
-    assert response.status_code == existing.status_code
-    assert response.json() == existing.json()
+
+
+def test_logout_clears_cookie(api):
+    """POST /auth/logout must delete the session cookie."""
+    client = api[0]
+    # Login first to get a cookie
+    client.post(
+        "/auth/login",
+        json={"email": "student@example.com", "password": "Pass123!"},
+    )
+    assert settings.COOKIE_NAME in client.cookies
+
+    logout = client.post("/auth/logout")
+    assert logout.status_code == 200
+
+    # Cookie must be gone
+    assert settings.COOKIE_NAME not in client.cookies or client.cookies[settings.COOKIE_NAME] == ""
+
+    # /auth/me must now reject without Bearer
+    me = client.get("/auth/me")
+    assert me.status_code == 401
 
 
 @pytest.mark.parametrize(
@@ -151,8 +191,17 @@ def test_login_still_requires_email_verification(api):
 def test_openapi_documents_login_role_and_me_response(api):
     schema = api[0].get("/openapi.json").json()
     schemas = schema["components"]["schemas"]
+
+    # LoginResponse must only contain 'role' — no token fields
+    login_props = set(schemas["LoginResponse"]["properties"])
+    assert "role" in login_props
+    assert "access_token" not in login_props
+    assert "token_type" not in login_props
+
     assert schemas["LoginResponse"]["properties"]["role"]["enum"] == ["student", "admin"]
     assert "role" in schemas["LoginResponse"]["required"]
     assert set(schemas["CurrentUserResponse"]["properties"]) == {"id", "email", "name", "role"}
-    assert schema["paths"]["/auth/me"]["get"]["security"] == [{"HTTPBearer": []}]
-    assert set(schemas["GoogleAuthResponse"]["properties"]) == {"access_token", "token_type", "user"}
+
+    # GoogleAuthResponse must only contain 'user' — no token fields
+    google_props = set(schemas["GoogleAuthResponse"]["properties"])
+    assert google_props == {"user"}

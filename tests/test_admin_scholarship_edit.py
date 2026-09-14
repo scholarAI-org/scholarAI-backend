@@ -48,12 +48,15 @@ class AdminScholarshipEditTests(unittest.TestCase):
                     "attachments SCHOLARSHIP_ATTACHMENTS, is_extension BOOLEAN DEFAULT 0, "
                     "source TEXT NOT NULL, source_id TEXT, source_url TEXT, study_level TEXT, "
                     "funding_type TEXT, majors JSON, required_documents JSON, "
+                    "eligibility_criteria JSON, "
                     "status TEXT DEFAULT 'pending', scraped_at TEXT, "
                     "reviewed_at TEXT, reviewed_by TEXT, rejection_reason TEXT, "
                     "admin_id INTEGER, rejected_at TEXT, updated_at TEXT)"
                 )
             )
+        from app.models.auth_account import AuthAccount
         User.__table__.create(self.engine)
+        AuthAccount.__table__.create(self.engine)
         AuditLog.__table__.create(self.engine)
         with self.session_factory() as db:
             admin = User(

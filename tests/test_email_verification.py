@@ -89,7 +89,8 @@ class EmailVerificationFlowTests(unittest.TestCase):
         with self.Session() as db:
             return db.query(User).filter(User.email == email).one()
 
-    def register_and_verify(self) -> str:
+    def register_and_verify(self) -> None:
+        """Register, verify OTP, login. Cookie is set on self.client automatically."""
         self.assertEqual(self.register().status_code, 201)
         otp = self.mailbox[-1][1]
         response = self.client.post(
@@ -102,7 +103,9 @@ class EmailVerificationFlowTests(unittest.TestCase):
             json={"email": "user@example.com", "password": "Pass123!"},
         )
         self.assertEqual(login.status_code, 200)
-        return login.json()["access_token"]
+        # Token is delivered as HttpOnly cookie, not in the body
+        self.assertIn("role", login.json())
+        self.assertNotIn("access_token", login.json())
 
     def test_register_creates_unverified_user_and_sends_hashed_otp(self):
         response = self.register()
@@ -143,7 +146,9 @@ class EmailVerificationFlowTests(unittest.TestCase):
             json={"email": "user@example.com", "password": "Pass123!"},
         )
         self.assertEqual(login.status_code, 200)
-        self.assertIn("access_token", login.json())
+        # Token is in cookie, not response body
+        self.assertNotIn("access_token", login.json())
+        self.assertIn("role", login.json())
 
     def test_unverified_user_cannot_login_then_can_login_after_verification(self):
         self.register()
@@ -180,7 +185,9 @@ class EmailVerificationFlowTests(unittest.TestCase):
             json={"email": "user@example.com", "password": "Pass123!"},
         )
         self.assertEqual(login.status_code, 200)
-        self.assertIn("access_token", login.json())
+        # Token is in cookie, not response body
+        self.assertNotIn("access_token", login.json())
+        self.assertIn("role", login.json())
 
     def test_wrong_and_expired_otp_fail(self):
         self.register()
@@ -357,17 +364,18 @@ class EmailVerificationFlowTests(unittest.TestCase):
         )
         self.assertEqual(reset.status_code, 200)
 
+        # After password reset, login again; cookie is set on self.client
         login = self.client.post(
             "/auth/login",
             json={"email": "user@example.com", "password": "Reset123!"},
         )
         self.assertEqual(login.status_code, 200)
-        reset_token = login.json()["access_token"]
+        self.assertNotIn("access_token", login.json())
 
+        # change-password uses cookie authentication (set on client by login above)
         changed = self.client.post(
             "/auth/change-password",
             json={"old_password": "Reset123!", "new_password": "Changed123!"},
-            headers={"Authorization": f"Bearer {reset_token}"},
         )
         self.assertEqual(changed.status_code, 200)
         final_login = self.client.post(
@@ -377,17 +385,16 @@ class EmailVerificationFlowTests(unittest.TestCase):
         self.assertEqual(final_login.status_code, 200)
 
     def test_logout_success(self):
-        token = self.register_and_verify()
-        response = self.client.post(
-            "/auth/logout",
-            headers={"Authorization": f"Bearer {token}"},
-        )
+        self.register_and_verify()
+        # Cookie is set on self.client after login inside register_and_verify
+        response = self.client.post("/auth/logout")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"message": "تم تسجيل الخروج بنجاح!"})
 
-    def test_logout_unauthorized_without_token(self):
+    def test_logout_does_not_require_authentication(self):
+        """Logout clears the cookie; it is always safe to call even without credentials."""
         response = self.client.post("/auth/logout")
-        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.status_code, 200)
 
 
     def test_email_failure_keeps_account_recoverable(self):
