@@ -81,7 +81,8 @@ class Token(BaseModel):
     token_type: str = "bearer"
 
 
-class LoginResponse(Token):
+class LoginResponse(BaseModel):
+    """Returned by /auth/login. Token is now delivered via HttpOnly cookie."""
     role: Literal["student", "admin"]
 
 
@@ -98,7 +99,8 @@ class GoogleAuthRequest(BaseModel):
     credential: str = Field(..., min_length=1, description="Google OpenID Connect ID token")
 
 
-class GoogleAuthResponse(Token):
+class GoogleAuthResponse(BaseModel):
+    """Returned by /auth/google. Token is now delivered via HttpOnly cookie."""
     user: UserResponse
 
 

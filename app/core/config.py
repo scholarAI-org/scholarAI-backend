@@ -12,6 +12,14 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "scholar_ai_super_secret_key_change_me_later"
     ALGORITHM: str = "HS256"
 
+    # Runtime environment — controls cookie security flags
+    # Set ENVIRONMENT=production in your hosting platform (Railway, etc.)
+    ENVIRONMENT: str = "development"  # "production" | "development"
+
+    # Cookie-based session settings
+    COOKIE_NAME: str = "access_token"
+    COOKIE_MAX_AGE: int = 60 * 60 * 24  # 24 hours in seconds
+
     # إعدادات الواجهة الأمامية
     FRONTEND_URL: str = "http://localhost:3000"
 
