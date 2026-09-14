@@ -153,6 +153,7 @@ class AdminDuplicateDetectionEndpointTests(unittest.TestCase):
                     "funding_type TEXT, "
                     "majors JSON, "
                     "required_documents JSON, "
+                    "eligibility_criteria JSON, "
                     "status TEXT DEFAULT 'pending', "
                     "scraped_at TIMESTAMP, "
                     "reviewed_at TIMESTAMP, "

@@ -45,6 +45,7 @@ class ScholarshipBase(BaseModel):
     funding_type: Optional[str] = Field(None, description="التغطية المالية (ممولة بالكامل، راتب شهري + رسوم)")
     majors: Optional[Union[List[str], str]] = Field(None, description="التخصصات المتاحة")
     required_documents: Optional[Union[List[str], str]] = Field(None, description="المستندات المطلوبة")
+    eligibility_criteria: Optional[Union[List[str], str]] = Field(None, description="شروط الأهلية")
 
     status: Optional[str] = Field(
         default="pending",
@@ -85,6 +86,7 @@ class ScholarshipUpdate(BaseModel):
     funding_type: Optional[str] = None
     majors: Optional[Union[List[str], str]] = None
     required_documents: Optional[Union[List[str], str]] = None
+    eligibility_criteria: Optional[Union[List[str], str]] = None
 
 
 

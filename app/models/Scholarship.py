@@ -105,6 +105,11 @@ class Scholarship(Base):
         nullable=True,
         comment="المستندات المطلوبة: خطاب دافع، CV",
     )
+    eligibility_criteria = Column(
+        JSON,
+        nullable=True,
+        comment="شروط الأهلية: قائمة شروط الأهلية أو مؤهلات التقديم",
+    )
 
     # Review workflow
     status = Column(
