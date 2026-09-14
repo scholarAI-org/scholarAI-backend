@@ -39,11 +39,13 @@ from app.schemas.admin import (
     ScholarshipReviewStatus,
     ScholarshipStatusUpdateRequest,
 )
+from app.schemas.admin_scholarship_edit import AdminScholarshipUpdate
 from app.schemas.Scholarship import ScholarshipResponse, ScholarshipUpdate
 from app.services.admin_notifications import (
     filtered_notifications,
     mark_notification_read,
 )
+from app.services.admin_scholarship_edit import edit_pending_scholarship
 from app.services.admin_statistics import (
     get_monthly_activity_statistics,
     get_pending_review_statistics,
@@ -885,6 +887,38 @@ def reject_scholarship(
         audit_log_id=log_entry.id,
         message="تم رفض وأرشفة المنحة بنجاح وتوثيق العملية في سجل التدقيق.",
     )
+
+
+@router.patch(
+    "/scholarships/{scholarship_id}",
+    response_model=ScholarshipResponse,
+    summary="Edit pending scholarship content",
+    description=(
+        "Partially updates a pending scholarship without changing its review status. "
+        "Unknown and immutable fields are rejected. Actual changes are audited; "
+        "empty or unchanged requests return the scholarship without an audit entry."
+    ),
+    responses={
+        401: {"description": "Missing or invalid authentication"},
+        403: {"description": "Requires admin role"},
+        404: {"description": "Scholarship not found"},
+        409: {"description": "Scholarship is not pending review"},
+        422: {"description": "Invalid scholarship content or unknown fields"},
+    },
+)
+def patch_scholarship(
+    scholarship_id: int,
+    payload: AdminScholarshipUpdate,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> ScholarshipResponse:
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This operation is restricted to administrators.",
+        )
+    scholarship = edit_pending_scholarship(db, scholarship_id, payload, current_user)
+    return ScholarshipResponse.model_validate(scholarship)
 
 
 @router.put(
