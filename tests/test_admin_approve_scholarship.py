@@ -45,6 +45,7 @@ class AdminApproveScholarshipTests(unittest.TestCase):
                     "funding_type TEXT, "
                     "majors JSON, "
                     "required_documents JSON, "
+                    "eligibility_criteria JSON, "
                     "image_url TEXT, "
                     "description_html TEXT, "
                     "apply_link TEXT, "

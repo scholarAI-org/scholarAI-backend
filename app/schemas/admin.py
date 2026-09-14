@@ -187,11 +187,17 @@ class ScholarshipDetailResponse(BaseModel):
     funding_type: Optional[str] = None
     majors: Optional[Union[List[str], str]] = None
     required_documents: Optional[Union[List[str], str]] = None
+    eligibility_criteria: Optional[Union[List[str], str]] = None
     scraped_at: Optional[datetime] = None
     source: str
     source_id: Optional[str] = None
     source_url: Optional[str] = None
     apply_link: Optional[str] = None
+    apply_email: Optional[str] = None
+    apply_phone: Optional[str] = None
+    pdf_url: Optional[str] = None
+    attachments: Optional[List[str]] = None
+    is_extension: Optional[bool] = False
     image_url: Optional[str] = None
     description_html: Optional[str] = None
     status: str
@@ -215,6 +221,7 @@ class ScholarshipApproveRequest(BaseModel):
     funding_type: Optional[str] = Field(None, description="التغطية المالية")
     majors: Optional[Union[List[str], str]] = Field(None, description="التخصصات المتاحة")
     required_documents: Optional[Union[List[str], str]] = Field(None, description="المستندات المطلوبة")
+    eligibility_criteria: Optional[Union[List[str], str]] = Field(None, description="شروط الأهلية")
     deadline: Optional[date] = Field(None, description="الموعد النهائي")
     no_deadline: Optional[bool] = Field(None, description="بدون موعد نهائي")
     notes: Optional[str] = Field(None, description="ملاحظات المراجعة أو النشر الإدارية")

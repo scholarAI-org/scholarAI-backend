@@ -16,6 +16,11 @@ router = APIRouter(prefix="/admin/scholarships", tags=["Admin"])
     "/{scholarship_id}/review-details",
     response_model=ScholarshipReviewDetailsResponse,
     summary="Get scholarship review details",
+    description=(
+        "Returns full scholarship review details for the dedicated review interface, "
+        "including overview, eligibility criteria, required documents, funding, "
+        "and source/application links. Requires an authenticated admin."
+    ),
     responses={
         401: {"description": "Missing or invalid authentication"},
         403: {"description": "Requires admin role"},
@@ -33,16 +38,8 @@ def get_scholarship_review_details(
             detail="This operation is restricted to administrators.",
         )
 
-    scholarship = (
-        db.query(
-            Scholarship.title,
-            Scholarship.organization_name,
-            Scholarship.country,
-            Scholarship.description_html.label("description"),
-        )
-        .filter(Scholarship.id == scholarship_id)
-        .first()
-    )
+    scholarship = db.query(Scholarship).filter(Scholarship.id == scholarship_id).first()
     if scholarship is None:
         raise HTTPException(status_code=404, detail="Scholarship not found")
+
     return ScholarshipReviewDetailsResponse.model_validate(scholarship)
